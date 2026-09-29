@@ -46,6 +46,8 @@ export const SIDE_MODE_READ_ONLY_COMMANDS = new Set([
   'transcript',
   'copy',
   'parent',
+  'details',
+  'expand',
 ]);
 
 export interface TuiCommand {
@@ -408,6 +410,12 @@ const COMMAND_SOURCES: readonly TuiCommandSource[] = [
     description: 'Set and use a Kilo / MiniMax API key',
     category: 'Runtime',
     argumentHint: '[api-key]',
+  },
+  {
+    name: 'details',
+    aliases: ['expand', 'detail'],
+    description: 'Toggle expanded transcript details (tool calls, arguments, outputs, and thinking)',
+    category: 'Transcript',
   },
   {
     name: 'plugins',

@@ -98,6 +98,9 @@ export function presentTranscriptToolEvidence(
   if (isBackgroundBashTranscriptCell(cell)) {
     return presentBackgroundBashEvidence(cell, options);
   }
+  if (normalizeToolName(cell.title) === 'pentest_probe') {
+    return presentPentestProbeEvidence(cell, options);
+  }
   if (family === 'shell') return presentShellEvidence(cell, options);
   if (family === 'read') return presentReadEvidence(cell, args, options);
   if (family === 'search') return presentSearchEvidence(cell, args, options);
@@ -488,4 +491,127 @@ function numberValue(value: unknown): number | undefined {
 function looksLikeJson(value: string): boolean {
   const trimmed = value.trim();
   return trimmed.startsWith('{') || trimmed.startsWith('[');
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function presentPentestProbeEvidence(
+  cell: TranscriptCell,
+  options: TranscriptToolEvidenceOptions,
+): TranscriptToolEvidence {
+  const lines: string[] = [];
+  let summary: string | undefined;
+
+  let parsedInput: Record<string, unknown> | undefined;
+  try {
+    const raw = JSON.parse(cell.content);
+    if (isRecord(raw)) parsedInput = raw;
+  } catch {}
+
+  if (parsedInput) {
+    if (isRecord(parsedInput.http)) {
+      const method =
+        typeof parsedInput.http.method === 'string' && parsedInput.http.method.trim()
+          ? parsedInput.http.method.trim().toUpperCase()
+          : 'GET';
+      const url = typeof parsedInput.http.url === 'string' ? parsedInput.http.url.trim() : '';
+      summary = url ? `${method} ${url}` : undefined;
+      if (options.displayMode !== 'collapsed' && url) {
+        lines.push(
+          toolLine(
+            `${chalk.bold.hex(colors.signal)('>')} ${chalk.hex(colors.text)(`${method} ${url}`)}`,
+            options,
+          ),
+        );
+        if (isRecord(parsedInput.http.headers)) {
+          for (const [k, v] of Object.entries(parsedInput.http.headers)) {
+            lines.push(
+              toolLine(
+                `${chalk.hex(colors.dim)('>')} ${chalk.hex(colors.muted)(`${k}: ${v}`)}`,
+                options,
+              ),
+            );
+          }
+        }
+        if (typeof parsedInput.http.body === 'string' && parsedInput.http.body.trim()) {
+          const bodyLines = cleanLines(parsedInput.http.body);
+          const bodyLimit = options.displayMode === 'expanded' ? bodyLines.length : 4;
+          bodyLines.slice(0, bodyLimit).forEach((b) => {
+            lines.push(
+              toolLine(`${chalk.hex(colors.dim)('>')} ${chalk.hex(colors.muted)(b)}`, options),
+            );
+          });
+          if (bodyLines.length > bodyLimit) {
+            lines.push(
+              toolLine(
+                chalk.hex(colors.muted)(`… ${bodyLines.length - bodyLimit} more body lines`),
+                options,
+              ),
+            );
+          }
+        }
+      }
+    } else if (isRecord(parsedInput.tcp)) {
+      const host = typeof parsedInput.tcp.host === 'string' ? parsedInput.tcp.host.trim() : '';
+      const port = parsedInput.tcp.port ? String(parsedInput.tcp.port) : '';
+      summary = host && port ? `tcp://${host}:${port}` : host;
+      if (options.displayMode !== 'collapsed' && summary) {
+        lines.push(
+          toolLine(
+            `${chalk.bold.hex(colors.signal)('>')} ${chalk.hex(colors.text)(`connect ${summary}`)}`,
+            options,
+          ),
+        );
+      }
+    } else if (isRecord(parsedInput.dns)) {
+      const host = typeof parsedInput.dns.host === 'string' ? parsedInput.dns.host.trim() : '';
+      const type =
+        typeof parsedInput.dns.recordType === 'string' ? parsedInput.dns.recordType.trim() : 'A';
+      summary = host ? `DNS ${type} ${host}` : undefined;
+      if (options.displayMode !== 'collapsed' && summary) {
+        lines.push(
+          toolLine(
+            `${chalk.bold.hex(colors.signal)('>')} ${chalk.hex(colors.text)(`query ${summary}`)}`,
+            options,
+          ),
+        );
+      }
+    } else if (isRecord(parsedInput.tls)) {
+      const host = typeof parsedInput.tls.host === 'string' ? parsedInput.tls.host.trim() : '';
+      const port = parsedInput.tls.port ? String(parsedInput.tls.port) : '443';
+      summary = host ? `TLS ${host}:${port}` : undefined;
+      if (options.displayMode !== 'collapsed' && summary) {
+        lines.push(
+          toolLine(
+            `${chalk.bold.hex(colors.signal)('>')} ${chalk.hex(colors.text)(`inspect ${summary}`)}`,
+            options,
+          ),
+        );
+      }
+    }
+  }
+
+  if (options.displayMode !== 'collapsed' && cell.detail?.trim()) {
+    const rawLines = cleanLines(cell.detail);
+    const limit =
+      options.displayMode === 'expanded' ? rawLines.length : cell.status === 'failed' ? 8 : 4;
+    const slice = rawLines.slice(0, limit);
+    slice.forEach((line) => {
+      lines.push(
+        toolLine(
+          `${chalk.hex(colors.dim)('│')} ${chalk.hex(cell.status === 'failed' ? colors.error : colors.muted)(line)}`,
+          options,
+        ),
+      );
+    });
+    if (rawLines.length > limit) {
+      lines.push(
+        toolLine(chalk.hex(colors.muted)(`… ${rawLines.length - limit} more lines`), options),
+      );
+    }
+  }
+
+  return { summary, lines, handlesDetail: true };
 }

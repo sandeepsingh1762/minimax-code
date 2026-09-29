@@ -7,6 +7,7 @@ import {
 } from '@earendil-works/pi-ai';
 import type { StreamFn, ThinkingLevel as PiThinkingLevel } from '@earendil-works/pi-agent-core';
 import {
+  KILO_API_MODEL_CATALOG,
   isFirstPartyMinimaxMessagesRoute,
   resolveProviderAuthMode,
   type ProviderAuthMode,
@@ -283,10 +284,17 @@ function requireModelIdentity(agentConfig: IAgentConfig): ModelIdentity {
   const modelRef = agentConfig.model;
   if (!modelRef) throw new Error('LocalModelResolver: agentConfig.model is required');
   const provider = modelRef.provider?.trim() ?? '';
-  const modelId = modelRef.model_id?.trim() ?? '';
+  let modelId = modelRef.model_id?.trim() ?? '';
   if (!provider) throw new Error('LocalModelResolver: ModelRef.provider is required');
   if (!modelId) throw new Error('LocalModelResolver: ModelRef.model_id is required');
-  return { modelRef, provider, modelId };
+  if (provider === KILO_PROVIDER_ID || provider === 'kilo_api' || provider === 'minimax_api') {
+    if (modelId.startsWith('kilo/')) modelId = modelId.slice(5);
+    else if (modelId.startsWith('kilo_api/')) modelId = modelId.slice(9);
+    if (!KILO_API_MODEL_CATALOG[modelId] && KILO_API_MODEL_CATALOG[`${modelId}:free`]) {
+      modelId = `${modelId}:free`;
+    }
+  }
+  return { modelRef: { ...modelRef, model_id: modelId }, provider, modelId };
 }
 
 function selectExternalByokPlan(

@@ -73,6 +73,8 @@ export interface CreateTuiAppOptions extends TuiUpdateOptions {
   businessTelemetry?: McodeBusinessTelemetry;
   auth?: McodeAuthPort;
   externalEditorCommand?: string;
+  /** Initial transcript details presentation mode. Defaults to compact or MCODE_DETAILED env. */
+  transcriptMainMode?: 'compact' | 'detailed';
   editDraftInExternalEditor?: EditTuiDraftInExternalEditor;
   readClipboardText?: TuiTextClipboardReader;
   writeClipboardText?: TuiTextClipboardWriter;

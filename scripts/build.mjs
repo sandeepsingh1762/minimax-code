@@ -1,6 +1,7 @@
 import { build } from "esbuild";
 import {
   readFileSync,
+  readdirSync,
   existsSync,
   mkdirSync,
   rmSync,
@@ -32,7 +33,19 @@ const packages = new Map(
 );
 const location = createTuiBundleModuleLocationConfig();
 const outdir = path.join(root, "dist");
-rmSync(outdir, { recursive: true, force: true });
+try {
+  rmSync(outdir, { recursive: true, force: true });
+} catch {
+  if (existsSync(outdir)) {
+    for (const entry of readdirSync(outdir)) {
+      if (entry !== "native") {
+        try {
+          rmSync(path.join(outdir, entry), { recursive: true, force: true });
+        } catch {}
+      }
+    }
+  }
+}
 mkdirSync(outdir, { recursive: true });
 
 // Bundle checked-in workspace sources and resolve npm dependencies from each importer.
@@ -114,10 +127,16 @@ copyLocalRuntimeAssets({
   filter: shouldCopyTuiRuntimeResource,
   excludedBuiltinSkillNames: TUI_DISABLED_BUILTIN_SKILL_NAMES,
 });
-for (const name of ["configs", "native"])
-  cpSync(path.join(root, "packages/tui", name), path.join(outdir, name), {
-    recursive: true,
-  });
+for (const name of ["configs", "native"]) {
+  try {
+    cpSync(path.join(root, "packages/tui", name), path.join(outdir, name), {
+      recursive: true,
+      force: true,
+    });
+  } catch (err) {
+    if (name !== "native") throw err;
+  }
+}
 for (const name of ["seccomp", "srt-win", "java-proxy-agent"]) {
   cpSync(
     path.join(root, "third_party/sandbox-runtime/vendor", name),

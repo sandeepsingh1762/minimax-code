@@ -125,6 +125,20 @@ const BUILTIN_TOOL_DEFINITIONS: readonly TranscriptToolDefinition[] = [
     failedAction: 'Call failed',
     previewLines: { running: 3, completed: 3, failed: 8 },
   },
+  {
+    names: ['pentest_probe'],
+    runningAction: 'Pentest Probe',
+    completedAction: 'Pentest Probe',
+    failedAction: 'Pentest Probe failed',
+    previewLines: { running: 6, completed: 6, failed: 8 },
+  },
+  {
+    names: ['pentest_findings'],
+    runningAction: 'Pentest Findings',
+    completedAction: 'Pentest Findings',
+    failedAction: 'Pentest Findings failed',
+    previewLines: { running: 4, completed: 4, failed: 8 },
+  },
 ];
 
 const TOOL_DEFINITIONS: ReadonlyMap<string, TranscriptToolDefinition> = new Map(

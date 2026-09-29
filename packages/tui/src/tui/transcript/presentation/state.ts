@@ -16,6 +16,10 @@ export class TranscriptPresentationController implements TranscriptDisplayModeRe
   private mode: TranscriptMainMode = 'compact';
   private revisionValue = 0;
 
+  constructor(initialMode: TranscriptMainMode = 'compact') {
+    this.mode = initialMode;
+  }
+
   get revision(): number {
     return this.revisionValue;
   }

@@ -5,6 +5,7 @@ import type { LLMModelConfig } from '@mavis/agent-core/pi-turn-runner';
 import { withOpenCodeGoHeaders, withOpenRouterAttributionHeaders } from '@mavis/shared';
 import { logger } from '../common/logger.js';
 import {
+  KILO_API_MODEL_CATALOG,
   KILO_API_PROVIDER_ID,
   KILO_PROVIDER_ID,
   isManagedProviderBaseUrl,
@@ -177,9 +178,16 @@ export class LocalModelResolver implements LocalModelResolverLike {
       throw new Error('LocalModelResolver: agentConfig.model is required');
     }
     const provider = modelRef.provider?.trim() ?? '';
-    const modelId = modelRef.model_id?.trim() ?? '';
+    let modelId = modelRef.model_id?.trim() ?? '';
     if (!provider) throw new Error('LocalModelResolver: ModelRef.provider is required');
     if (!modelId) throw new Error('LocalModelResolver: ModelRef.model_id is required');
+    if (provider === KILO_PROVIDER_ID || provider === 'kilo_api' || provider === 'minimax_api') {
+      if (modelId.startsWith('kilo/')) modelId = modelId.slice(5);
+      else if (modelId.startsWith('kilo_api/')) modelId = modelId.slice(9);
+      if (!KILO_API_MODEL_CATALOG[modelId] && KILO_API_MODEL_CATALOG[`${modelId}:free`]) {
+        modelId = `${modelId}:free`;
+      }
+    }
 
     const providerConfig = this.providerConfigGetter?.() ?? this.providerConfig;
     const parsed = parseProviderId(provider);

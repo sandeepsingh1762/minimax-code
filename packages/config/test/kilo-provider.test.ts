@@ -62,10 +62,10 @@ describe('credential resolution', () => {
 
 describe('free-model catalog', () => {
   it('ships the free tier the gateway actually serves', () => {
-    // The gateway advertises 20 free entries; two are audio-generation
+    // The gateway advertises 19 free entries; two are audio-generation
     // previews kept for completeness but disabled, which is asserted below.
-    expect(Object.keys(KILO_FREE_MODELS)).toHaveLength(20);
-    expect(Object.keys(KILO_API_MODEL_CATALOG)).toHaveLength(20);
+    expect(Object.keys(KILO_FREE_MODELS)).toHaveLength(19);
+    expect(Object.keys(KILO_API_MODEL_CATALOG)).toHaveLength(19);
   });
 
   it('keeps the audio-generation previews present but disabled and unselectable', () => {
@@ -82,8 +82,8 @@ describe('free-model catalog', () => {
     // An enabled model that cannot call tools is useless to this agent, so it
     // must be disabled rather than shipped in the picker.
     const enabled = Object.values(KILO_FREE_MODELS).filter((m) => m.enabled !== false);
-    expect(enabled).toHaveLength(18);
-    expect(enabled.filter((m) => m.tool_call === true)).toHaveLength(17);
+    expect(enabled).toHaveLength(17);
+    expect(enabled.filter((m) => m.tool_call === true)).toHaveLength(16);
     for (const model of enabled) {
       if (model.tool_call === false) continue;
       expect(model.temperature, model.id).toBe(true);

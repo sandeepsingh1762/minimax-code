@@ -103,16 +103,6 @@ export const KILO_FREE_MODELS: Record<string, ModelConfig> = {
     modalities: { input: ['text'], output: ['text'] },
     limit: { context: 262_144, output: 32_768 },
   },
-  'inclusionai/ling-3.0-flash-fin:free': {
-    id: 'inclusionai/ling-3.0-flash-fin:free',
-    name: 'inclusionAI Ling 3.0 Flash Fin',
-    reasoning: true,
-    tool_call: true,
-    temperature: true,
-    attachment: false,
-    modalities: { input: ['text'], output: ['text'] },
-    limit: { context: 262_144, output: 32_768 },
-  },
   'qwen/qwen3.8-27b:free': {
     id: 'qwen/qwen3.8-27b:free',
     name: 'Qwen3.8 27B',

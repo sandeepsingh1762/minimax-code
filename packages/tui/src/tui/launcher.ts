@@ -416,6 +416,10 @@ export async function launchTui(
           (dependencies.writeTuiTheme ?? writeTuiThemeSetting)(dataDir, value),
         persistStatusLineItems: (items) => writeTuiStatusLineSetting(dataDir, items),
         externalEditorCommand: options.externalEditorCommand,
+        transcriptMainMode:
+          process.env.MCODE_DETAILED === '0' || process.env.MCODE_DETAILED === 'false'
+            ? 'compact'
+            : 'detailed',
         observability,
         incidentReporter,
         ...(businessTelemetry ? { businessTelemetry } : {}),

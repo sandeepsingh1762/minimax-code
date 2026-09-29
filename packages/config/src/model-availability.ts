@@ -144,10 +144,15 @@ export function listRouteModelIds(
 /** The single availability answer shared by list, save and Turn execution. */
 export function resolveModelAvailability(input: ModelAvailabilityInput): ModelAvailability {
   const route = resolveModelCallRoute(input.config, input.providerId);
-  const modelId = input.modelId.trim();
+  let modelId = input.modelId.trim();
+  if (input.providerId === 'kilo' || input.providerId === 'kilo_api') {
+    if (modelId.startsWith('kilo/')) modelId = modelId.slice(5);
+    else if (modelId.startsWith('kilo_api/')) modelId = modelId.slice(9);
+  }
+  const routeModels = listRouteModelIds(input.config, input.providerId, input.preset);
   if (
     modelId.length > 0 &&
-    listRouteModelIds(input.config, input.providerId, input.preset).includes(modelId)
+    (routeModels.includes(modelId) || routeModels.includes(`${modelId}:free`))
   ) {
     return { available: true, route };
   }

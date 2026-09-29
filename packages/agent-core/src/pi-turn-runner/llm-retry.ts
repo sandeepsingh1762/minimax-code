@@ -17,7 +17,12 @@ import {
 } from '@mavis/shared/llm-error-classifier';
 
 function isByokProvider(provider: string): boolean {
-  return provider === 'minimax_api' || provider.startsWith('custom_provider:');
+  return (
+    provider === 'minimax_api' ||
+    provider === 'kilo_api' ||
+    provider === 'kilo' ||
+    provider.startsWith('custom_provider:')
+  );
 }
 
 export type LLMCallScope = 'agent' | 'compaction' | 'title';

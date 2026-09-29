@@ -80,7 +80,7 @@ export function createTuiApp(options: CreateTuiAppOptions): TuiApp {
   const transcript = new TranscriptStore();
   const transcriptVisibility = new TranscriptVisibilityProjection(transcript);
   const transcriptView = new TranscriptView(transcriptVisibility, {
-    displayModes: new TranscriptPresentationController(),
+    displayModes: new TranscriptPresentationController(options.transcriptMainMode ?? 'compact'),
     workspaceDir: options.workspaceDir,
   });
   const editor = createEditor(tui, workspaceRoots, options.runtime);

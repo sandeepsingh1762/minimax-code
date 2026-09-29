@@ -1059,6 +1059,15 @@ export class TuiCommandFlow {
       help: async () => this.options.activeRunFlow.showHelp(),
       update: async () => this.options.updateFlow.show(),
       changelog: async () => this.options.featureFlow.showChangelog(),
+      details: () => {
+        const mode = this.options.featureFlow.toggleTranscriptDetails();
+        this.options.setHint(
+          mode === 'detailed'
+            ? 'Transcript details expanded (showing tool calls & thinking).'
+            : 'Transcript details collapsed.',
+        );
+        this.options.onChanged();
+      },
       new: () => this.options.sessionFlow.startNew(),
       sessions: async ({ raw, args }) => {
         if (
