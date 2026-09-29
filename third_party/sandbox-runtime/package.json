@@ -22,7 +22,7 @@
   },
   "dependencies": {
     "@pondwader/socks5-server": "^1.0.10",
-    "commander": "^12.1.0",
+    "commander": "^15.0.0",
     "node-forge": "^1.4.0",
     "zod": "^3.24.1"
   },
