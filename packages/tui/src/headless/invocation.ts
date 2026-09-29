@@ -13,9 +13,19 @@ import { inferTuiNativeVideoMimeType } from '../application/video-mime.js';
 import { resolveWslPath } from '../host/wsl-path.js';
 import { TuiExecError } from './exit-policy.js';
 import type { TuiExecFormat } from './output.js';
+import { AGENT_PROMPT_MODES } from '@mavis/local-runtime-v2/process-local';
 
 export type TuiInputFormat = 'text' | 'json';
 export type TuiPermissionPolicy = 'smart' | 'full' | 'off';
+/**
+ * Prompt families the headless surface can request.
+ *
+ * Derived from the runtime's own `AGENT_PROMPT_MODES` so the CLI cannot
+ * advertise a mode the loader would reject, and cannot silently omit one it
+ * supports — both of which previously happened when this list was hand-kept.
+ */
+export const TUI_PROMPT_MODES = AGENT_PROMPT_MODES;
+export type TuiPromptMode = (typeof TUI_PROMPT_MODES)[number];
 
 export interface RawTuiExecOptions {
   /** Internal command identity set by `mcode exec review`. */
@@ -46,7 +56,7 @@ export interface ResolvedTuiExecInvocation {
   attachments: TuiAttachment[];
   model?: string;
   effort?: string;
-  promptMode?: 'tui' | 'coding' | 'work';
+  promptMode?: TuiPromptMode;
   sessionId?: string;
   continueSession: boolean;
   configPath?: string;
@@ -97,11 +107,7 @@ export async function resolveTuiExecInvocation(
   if (options.session && options.continue) {
     throw invocationError('--session and --continue are mutually exclusive.');
   }
-  const promptMode = readEnum('--prompt-mode', options.promptMode ?? 'tui', [
-    'tui',
-    'coding',
-    'work',
-  ] as const);
+  const promptMode = readEnum('--prompt-mode', options.promptMode ?? 'tui', TUI_PROMPT_MODES);
   const inputFormat = readEnum('--input-format', options.inputFormat ?? 'text', [
     'text',
     'json',

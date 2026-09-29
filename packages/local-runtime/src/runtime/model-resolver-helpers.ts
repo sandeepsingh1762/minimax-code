@@ -1,6 +1,10 @@
 import type { IAgentConfig } from '@mavis/protocol';
 import type { Api, Model } from '@earendil-works/pi-ai';
-import { allowsManagedMinimaxProviderOverride, type ProviderAuthMode } from '@mavis/config';
+import {
+  KILO_PROVIDER_ID,
+  allowsManagedMinimaxProviderOverride,
+  type ProviderAuthMode,
+} from '@mavis/config';
 
 import { MANAGED_PROVIDER_USER_AGENT } from './model-resolver.js';
 import {
@@ -9,7 +13,7 @@ import {
 } from './routing-headers.js';
 
 export function allowsManagedMinimaxProxy(provider: string): boolean {
-  return provider === 'minimax' && allowsManagedMinimaxProviderOverride();
+  return provider === KILO_PROVIDER_ID && allowsManagedMinimaxProviderOverride();
 }
 
 export function providerRouteForAuthMode(authMode: ProviderAuthMode): string {

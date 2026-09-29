@@ -1,7 +1,11 @@
+import { CANONICAL_SUBAGENT_ROLES } from '@mavis/agent-tools/desktop/subagent-roles';
+
 import type { TuiDelegatedAgent, TuiDelegatedAgentStatus, TuiSession } from './port.js';
 
 const WORKER_PURPOSE_PREFIXES = ['local-task:', 'local-background-task:', 'team-plan:'] as const;
-const BUILTIN_SUBAGENT_NAMES = new Set(['explore', 'worker', 'verifier']);
+// Derived from the canonical role table: a TUI session running any built-in
+// role is internal, so a new offensive role is covered without editing the TUI.
+const BUILTIN_SUBAGENT_NAMES = new Set<string>(CANONICAL_SUBAGENT_ROLES);
 
 function hasTuiDelegatedSessionIdentity(session: TuiSession): boolean {
   return (

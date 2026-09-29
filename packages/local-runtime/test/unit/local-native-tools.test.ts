@@ -392,7 +392,7 @@ describe('local native turn tools', () => {
         properties: { agent_name: { description: string } };
       };
       expect(schema.properties.agent_name.description).toContain(
-        'Use explore, worker, or verifier',
+        'Use explore, worker, verifier, recon, webapp, infra, or mobile',
       );
       expect(schema.properties.agent_name.description).not.toContain('general');
       expect(schema.properties.agent_name.description).not.toContain('coder');

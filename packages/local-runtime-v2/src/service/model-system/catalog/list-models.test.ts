@@ -32,10 +32,10 @@ describe('model catalog helpers', () => {
       'oauth',
     );
     expect(
-      builtinProviderKind(config(), 'minimax', { options: { authMode: 'managed-login' } }),
+      builtinProviderKind(config(), 'kilo', { options: { authMode: 'managed-login' } }),
     ).toBe('minimax-managed');
     expect(
-      builtinProviderKind(config({ minimaxModelSource: 'minimax_api_key' }), 'minimax', {
+      builtinProviderKind(config({ minimaxModelSource: 'minimax_api_key' }), 'kilo', {
         options: { authMode: 'managed-login' },
       }),
     ).toBe('minimax-api-key');
@@ -65,31 +65,33 @@ describe('model catalog helpers', () => {
     expect(enabledCustomProviders(runtimeConfig).map(([key]) => key)).toEqual(['work']);
   });
 
-  it('uses the user-owned MiniMax API context instead of the managed model entry', () => {
+  it('uses the user-owned API-key catalog instead of the managed model entry', () => {
     const runtimeConfig = config({
       minimaxModelSource: 'minimax_api_key',
-      minimax_api: { modelContextLimits: { 'MiniMax-M3': 1_000_000 } },
+      // The shipped catalog publishes no user-selectable context tiers, so a
+      // stored selection outside it must not shadow the catalog limit.
+      minimax_api: { modelContextLimits: { 'kilo-auto/free': 1_000_000 } },
       provider: {
-        minimax: {
-          models: { 'MiniMax-M3': { limit: { context: 256_000 } } },
+        kilo: {
+          models: { 'kilo-auto/free': { limit: { context: 65_536 } } },
         },
       },
     });
 
     expect(
-      routeModelEntries(runtimeConfig, 'minimax', runtimeConfig.provider.minimax ?? {}).find(
-        ([modelId]) => modelId === 'MiniMax-M3',
+      routeModelEntries(runtimeConfig, 'kilo', runtimeConfig.provider.kilo ?? {}).find(
+        ([modelId]) => modelId === 'kilo-auto/free',
       )?.[1].limit?.context,
-    ).toBe(1_000_000);
-    expect(modelConfigForRef(runtimeConfig, 'minimax', 'MiniMax-M3')?.limit?.context).toBe(
-      1_000_000,
+    ).toBe(256_000);
+    expect(modelConfigForRef(runtimeConfig, 'kilo', 'kilo-auto/free')?.limit?.context).toBe(
+      256_000,
     );
   });
 
   it('lists managed models in the configured catalog order', () => {
     const runtimeConfig = config({
       provider: {
-        minimax: {
+        kilo: {
           options: { authMode: 'managed-login' },
           model_order: ['MiniMax-M3.1', 'MiniMax-M3'],
           models: { 'MiniMax-M3': {}, 'MiniMax-M3.1': {} },
@@ -98,7 +100,7 @@ describe('model catalog helpers', () => {
     });
 
     expect(
-      routeModelEntries(runtimeConfig, 'minimax', runtimeConfig.provider.minimax ?? {}).map(
+      routeModelEntries(runtimeConfig, 'kilo', runtimeConfig.provider.kilo ?? {}).map(
         ([modelId]) => modelId,
       ),
     ).toEqual(['MiniMax-M3.1', 'MiniMax-M3']);

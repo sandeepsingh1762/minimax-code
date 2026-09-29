@@ -1,4 +1,4 @@
-import { resolveProviderAuthMode } from "@mavis/config";
+import { KILO_PROVIDER_ID, resolveProviderAuthMode } from "@mavis/config";
 
 import {
   SAFETY_SCENE,
@@ -75,7 +75,7 @@ function isUnmanagedProvider(
     return provider !== undefined && provider.enabled !== false;
   }
   if (
-    model.providerId === "minimax" &&
+    model.providerId === KILO_PROVIDER_ID &&
     config.minimaxModelSource === "minimax_api_key"
   )
     return true;

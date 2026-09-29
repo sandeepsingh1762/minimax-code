@@ -1,5 +1,6 @@
 import { DEFAULT_MODEL_PRESETS, getRuntimePresetKey } from '@mavis/config';
 
+import { KILO_PROVIDER_ID } from '../identity.js';
 import { parseProviderId, parseSourceQualifiedModelKey } from '../resolution/model-key.js';
 import type {
   LocalByokConfigDraft,
@@ -124,7 +125,7 @@ export function minimaxContextBaselineFingerprint(
     minimaxApi: config.minimax_api,
     model:
       source === 'token_plan'
-        ? config.provider?.minimax?.models?.[modelId]
+        ? config.provider?.[KILO_PROVIDER_ID]?.models?.[modelId]
         : minimaxApiModels(config)[modelId],
   });
 }

@@ -3,16 +3,24 @@
 // Model keys keep the legacy `providerId/modelId` shape; the providerId part
 // encodes which config tree the provider lives in:
 //
-//   'minimax/MiniMax-M3'                    -> config.provider (builtin tree)
-//   'minimax_api/MiniMax-M3'               -> config.minimax_api (user MiniMax API key)
-//   'custom_provider:openai-work/gpt-4.1' -> config.custom_provider['openai-work']
+//   'kilo/kilo-auto/free'                     -> config.provider (builtin tree)
+//   'kilo_api/kilo-auto/free'                 -> config.kilo_api (user gateway key)
+//   'custom_provider:openai-work/gpt-4.1'     -> config.custom_provider['openai-work']
 //
-// 'minimax_api' is a reserved provider id: it always resolves to the BYOK
-// source and never falls back to the legacy provider map (config-side
-// enforcement drops a hand-written `provider.minimax_api` entry at read time).
+// 'kilo_api' is a reserved provider id: it always resolves to the BYOK source
+// and never falls back to the legacy provider map (config-side enforcement
+// drops a hand-written `provider.kilo_api` entry at read time).
+//
+// The ids themselves are re-exported from @mavis/config rather than redeclared.
+// They used to be a second hand-kept literal here that drifted from the config
+// package ('minimax_api' vs 'kilo_api'), which silently made every real
+// `kilo_api` provider unrecognizable to this parser.
 
-export const MINIMAX_API_PROVIDER_ID = 'minimax_api';
-export const CUSTOM_PROVIDER_ID_PREFIX = 'custom_provider:';
+export {
+  KILO_API_PROVIDER_ID,
+  CUSTOM_PROVIDER_ID_PREFIX,
+} from '@mavis/config';
+import { CUSTOM_PROVIDER_ID_PREFIX, KILO_API_PROVIDER_ID } from '@mavis/config';
 
 export type ModelProviderSource = 'provider' | 'minimax_api' | 'custom_provider';
 
@@ -32,8 +40,8 @@ export function parseProviderId(
   providerId: string | undefined | null,
 ): ParsedProviderId | undefined {
   if (typeof providerId !== 'string' || providerId.length === 0) return undefined;
-  if (providerId === MINIMAX_API_PROVIDER_ID) {
-    return { source: 'minimax_api', providerId, providerKey: MINIMAX_API_PROVIDER_ID };
+  if (providerId === KILO_API_PROVIDER_ID) {
+    return { source: 'minimax_api', providerId, providerKey: KILO_API_PROVIDER_ID };
   }
   if (providerId.startsWith(CUSTOM_PROVIDER_ID_PREFIX)) {
     const providerKey = providerId.slice(CUSTOM_PROVIDER_ID_PREFIX.length);

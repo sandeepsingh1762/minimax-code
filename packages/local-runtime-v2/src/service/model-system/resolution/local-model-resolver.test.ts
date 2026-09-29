@@ -30,7 +30,7 @@ describe('LocalModelResolver', () => {
   it('uses the frozen M3 1M context in the resolved executor model', async () => {
     const resolver = new LocalModelResolver({
       providerConfig: {
-        minimax: { models: { 'MiniMax-M3': { limit: { context: 512_000, output: 128_000 } } } },
+        kilo: { models: { 'MiniMax-M3': { limit: { context: 512_000, output: 128_000 } } } },
       },
       byokConfigGetter: () => ({
         minimax_api: { apiKey: 'test-key', baseURL: 'https://example.invalid' },
@@ -41,7 +41,7 @@ describe('LocalModelResolver', () => {
       turnId: 'm3-turn',
       agentConfig: {
         ...AGENT_CONFIG,
-        model: { provider: 'minimax_api', model_id: 'MiniMax-M3', context_window: 1_000_000 },
+        model: { provider: 'kilo_api', model_id: 'MiniMax-M3', context_window: 1_000_000 },
       },
     });
     expect(resolved.model.contextWindow).toBe(1_000_000);
@@ -186,7 +186,7 @@ describe('LocalModelResolver', () => {
     const resolver = new LocalModelResolver({
       authContextGetter,
       providerConfig: {
-        minimax: {
+        kilo: {
           options: {
             authMode: 'managed-login',
             apiKey: 'sk-xxx',
@@ -202,7 +202,7 @@ describe('LocalModelResolver', () => {
       agentConfig: {
         ...AGENT_CONFIG,
         model: {
-          provider: 'minimax',
+          provider: 'kilo',
           model_id: 'MiniMax-M2.7',
         },
       },
@@ -365,12 +365,12 @@ describe('LocalModelResolver model routing', () => {
     });
   });
 
-  it('resolves source-qualified MiniMax API models from BYOK facts', async () => {
+  it('resolves source-qualified API-key models from BYOK facts', async () => {
     const resolver = new LocalModelResolver({
       providerConfig: {
-        minimax: {
+        kilo: {
           models: {
-            'MiniMax-M3': {
+            'kilo-auto/free': {
               limit: { context: 400_000, output: 128_000 },
             },
           },
@@ -390,8 +390,8 @@ describe('LocalModelResolver model routing', () => {
       agentConfig: {
         ...AGENT_CONFIG,
         model: {
-          provider: 'minimax_api',
-          model_id: 'MiniMax-M3',
+          provider: 'kilo_api',
+          model_id: 'kilo-auto/free',
         },
       },
     });
@@ -399,13 +399,13 @@ describe('LocalModelResolver model routing', () => {
     expect(resolved).toMatchObject({
       managedProvider: false,
       apiKey: 'minimax-user-key',
-      maxTokens: 128_000,
+      maxTokens: 32_768,
       model: {
-        provider: 'minimax_api',
-        id: 'MiniMax-M3',
+        provider: 'kilo_api',
+        id: 'kilo-auto/free',
         api: 'anthropic-messages',
         baseUrl: 'https://byok.example/messages-api',
-        contextWindow: 512_000,
+        contextWindow: 256_000,
       },
     });
     expect(resolved.streamFn).toBeTypeOf('function');
@@ -471,14 +471,14 @@ describe('LocalModelResolver request-body byte authority', () => {
 });
 
 describe('LocalModelResolver BYOK routing and fallback', () => {
-  it('honors the MiniMax BYOK source switch and the injected stream implementation', async () => {
+  it('honors the Kilo BYOK source switch and the injected stream implementation', async () => {
     const streamFn = vi.fn();
     const resolver = new LocalModelResolver({
       streamFn: streamFn as never,
       providerConfig: {
-        minimax: {
+        kilo: {
           models: {
-            'MiniMax-M3': {
+            'kilo-auto/free': {
               limit: { context: 400_000, output: 128_000 },
             },
           },
@@ -499,8 +499,8 @@ describe('LocalModelResolver BYOK routing and fallback', () => {
       agentConfig: {
         ...AGENT_CONFIG,
         model: {
-          provider: 'minimax',
-          model_id: 'MiniMax-M3',
+          provider: 'kilo',
+          model_id: 'kilo-auto/free',
         },
       },
     });
@@ -508,8 +508,8 @@ describe('LocalModelResolver BYOK routing and fallback', () => {
     expect(resolved).toMatchObject({
       apiKey: 'minimax-user-key',
       model: {
-        provider: 'minimax_api',
-        id: 'MiniMax-M3',
+        provider: 'kilo_api',
+        id: 'kilo-auto/free',
         api: 'anthropic-messages',
       },
     });

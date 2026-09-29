@@ -7,7 +7,7 @@ import {
 } from './list-models.js';
 import { modelCacheStatusFor, type ModelCacheData } from './model-cache.js';
 import type { LocalRuntimeConfig } from '../contracts.js';
-import { MANAGED_MINIMAX_PROVIDER_ID } from '../identity.js';
+import { KILO_PROVIDER_ID } from '../identity.js';
 
 export interface LocalRuntimeModelSelection {
   readonly providerId?: string;
@@ -134,7 +134,7 @@ function resolveApiFormat(
   provider: NonNullable<LocalRuntimeConfig['provider']>[string],
 ): { readonly apiFormat?: string } {
   if (
-    providerId === MANAGED_MINIMAX_PROVIDER_ID &&
+    providerId === KILO_PROVIDER_ID &&
     config.minimaxModelSource === 'minimax_api_key'
   ) {
     return { apiFormat: 'anthropic-messages' };

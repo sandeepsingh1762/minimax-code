@@ -12,9 +12,14 @@ import {
 import { loadConfigFromFile } from "../src/file-loader.js";
 
 const secret = "synthetic-preset-sync-secret";
-const oldBaseURL = "https://agent.minimax.io/mavis/api/v1/llm/v1";
-const presetBaseURL =
-  "https://matrix-overseas-pre.example.invalid/mavis/api/v1/llm/v1";
+/**
+ * The on-disk managed entry keeps the historic `provider.minimax` key, which is
+ * the only subtree the preset baseURL sync rewrites. A profile that predates the
+ * Kilo gateway still points at an earlier path on the same managed origin.
+ */
+const oldBaseURL = "https://kilocode.ai/api/gateway/legacy-free";
+/** Every preset key now resolves to the one Kilo gateway origin. */
+const presetBaseURL = "https://kilocode.ai/api/gateway/v1";
 const original = yaml.dump({
   logLevel: "debug",
   provider: { minimax: { options: { baseURL: oldBaseURL, apiKey: secret } } },
@@ -89,8 +94,11 @@ describe.each([
       const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
       const config = load();
       expect(config.logLevel).toBe("debug");
+      // The builtin provider is still served from the current preset gateway, and
+      // the legacy entry whose rewrite failed keeps its persisted endpoint.
+      expect(config.provider.kilo?.options?.baseURL).toBe(presetBaseURL);
       expect(config.provider.minimax?.options).toMatchObject({
-        baseURL: presetBaseURL,
+        baseURL: oldBaseURL,
         apiKey: secret,
       });
       expect(fs.readFileSync(file, "utf8")).toBe(original);
@@ -132,19 +140,22 @@ describe.each([
 it("honors the disabled preset synchronization policy", () => {
   setManagedPresetBaseUrlSyncEnabled(false);
   const truncate = vi.spyOn(fs, "ftruncateSync");
-  expect(getConfig().provider.minimax?.options?.baseURL).toBe(presetBaseURL);
+  // The persisted endpoint survives untouched when the sync is disabled.
+  expect(getConfig().provider.minimax?.options?.baseURL).toBe(oldBaseURL);
   expect(truncate).not.toHaveBeenCalled();
   expect(fs.readFileSync(file, "utf8")).toBe(original);
 });
 
 it.each([
-  ["prod", oldBaseURL],
+  // Protected builds and the file already carrying the preset agree on the gateway.
+  ["prod", presetBaseURL],
   ["test", presetBaseURL],
 ] as const)(
   "preserves %s provider policy after a safe sync failure",
   (buildEnv, expectedBaseURL) => {
     vi.stubEnv("MAVIS_BUILD_ENV", buildEnv);
-    // A staging endpoint needs syncing in both prod and test builds.
+    // The on-disk entry already carries the current preset, so only the read-time
+    // provider policy can differ between the two builds.
     fs.writeFileSync(file, original.replace(oldBaseURL, presetBaseURL));
     vi.spyOn(fs, "ftruncateSync").mockImplementation(() => {
       throw new Error("synthetic failure");

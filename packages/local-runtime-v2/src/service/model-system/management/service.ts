@@ -1,7 +1,7 @@
 import type { DiscoveredModel } from '../connectivity/discover-models.js';
 import { enabledCustomProviders, type ModelCacheStatusView } from '../catalog/list-models.js';
 import type { ModelCacheData } from '../catalog/model-cache.js';
-import { MINIMAX_API_PROVIDER_ID } from '../identity.js';
+import { KILO_API_PROVIDER_ID } from '../identity.js';
 import { LocalModelProviderError } from '../contracts.js';
 import {
   discoverUserModelsCandidate as discoverUserModelsCandidateOperation,
@@ -91,10 +91,10 @@ export class LocalModelProviderService {
 
   revealModelProviderApiKey(input: { providerId: string }): string {
     const config = this.context.deps.configGetter();
-    if (input.providerId === MINIMAX_API_PROVIDER_ID) {
+    if (input.providerId === KILO_API_PROVIDER_ID) {
       const apiKey = config.minimax_api?.apiKey;
       if (!apiKey?.trim()) {
-        throw new LocalModelProviderError(400, 'MiniMax API key is not configured', 'NO_API_KEY');
+        throw new LocalModelProviderError(400, 'Kilo API key is not configured', 'NO_API_KEY');
       }
       return apiKey;
     }

@@ -1,5 +1,5 @@
 import type { LocalModelConfig, LocalRuntimeConfig } from '../contracts.js';
-import { MINIMAX_API_PROVIDER_ID, parseProviderId } from '../resolution/model-key.js';
+import { KILO_API_PROVIDER_ID, parseProviderId } from '../resolution/model-key.js';
 import { minimaxApiBaseUrl, minimaxApiModels } from './minimax-api.js';
 import {
   modelCacheStatusFor,
@@ -50,7 +50,7 @@ function minimaxModelTestStatus(
     },
     model,
   );
-  return modelCacheStatusFor(cache, MINIMAX_API_PROVIDER_ID, modelId, fingerprint);
+  return modelCacheStatusFor(cache, KILO_API_PROVIDER_ID, modelId, fingerprint);
 }
 
 function customModelTestStatus(input: {

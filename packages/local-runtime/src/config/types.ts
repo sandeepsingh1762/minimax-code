@@ -110,6 +110,19 @@ export interface LocalRuntimeConfig {
     enabled?: boolean;
     proactive?: boolean;
   };
+  /**
+   * Offensive-security engagement surface. Mirrors the resolved config
+   * section; every field is optional here because a host may construct a
+   * partial config in tests or in a constrained surface.
+   */
+  pentest?: {
+    /** Withholds both engagement tools when false. */
+    enabled?: boolean;
+    /** Withholds only `pentest_probe` when false, keeping the ledger. */
+    probeEnabled?: boolean;
+    /** Authorized hosts and CIDRs. Empty means permission-system-only. */
+    scope?: string[];
+  };
   hooks?: {
     enabled?: boolean;
   };

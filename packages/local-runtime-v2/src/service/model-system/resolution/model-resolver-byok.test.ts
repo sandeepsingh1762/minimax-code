@@ -74,23 +74,25 @@ describe('MiniMax API BYOK planning', () => {
       maxTokens: 20,
     });
 
+    // The shipped API-key catalog publishes no user-selectable context tiers, so
+    // a stored selection is ignored and the managed provider config is never read.
     expect(
       planMinimaxApiResolution({
         byok: {
           minimax_api: {
             apiKey: 'key',
-            modelContextLimits: { 'MiniMax-M3': 1_000_000 },
+            modelContextLimits: { 'kilo-auto/free': 512_000 },
           },
         },
         providerConfig: {
-          minimax: {
-            models: { 'MiniMax-M3': { limit: { context: 30, output: 40 } } },
+          kilo: {
+            models: { 'kilo-auto/free': { limit: { context: 30, output: 40 } } },
           },
         },
-        modelId: 'MiniMax-M3',
+        modelId: 'kilo-auto/free',
         catalog: { contextWindow: 10, maxTokens: 20, fromCatalog: true },
       }),
-    ).toMatchObject({ contextWindow: 1_000_000, maxTokens: 128_000 });
+    ).toMatchObject({ contextWindow: 256_000, maxTokens: 32_768 });
   });
 });
 

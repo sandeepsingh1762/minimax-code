@@ -1,3 +1,5 @@
+import { GOAL_CONFIG_LIMITS } from '@mavis/config';
+
 import type {
   ThreadGoalBreakerCause,
   ThreadGoalBreakerInput,
@@ -50,7 +52,19 @@ export function updateThreadGoalBreaker(
     const state = rowToThreadGoalState(existing);
     if (!state) return { action: 'stale', staleReason: 'missing_goal' };
 
-    const occurrenceLimit = Number.isFinite(input.limit) ? Math.max(2, Math.floor(input.limit)) : 2;
+    /*
+     * The occurrence ladder is the loop's only stop for an unbudgeted Goal, so
+     * the store — the last writer before the row is committed — clamps it into
+     * [2, GOAL_CONFIG_LIMITS] whatever the caller resolved. A limit of 1 would
+     * pause a Goal on the first reply it has not seen before, and an unbounded
+     * limit would silently disable the breaker.
+     */
+    const occurrenceLimit = Number.isFinite(input.limit)
+      ? Math.min(
+          GOAL_CONFIG_LIMITS.breaker.repeatedReplyLimit,
+          Math.max(2, Math.floor(input.limit)),
+        )
+      : GOAL_CONFIG_LIMITS.breaker.repeatedReplyLimit;
 
     // Repeated-reply condition. A Turn without usable reply text carries no
     // fingerprint evidence at all, so it leaves both the stored fingerprint and

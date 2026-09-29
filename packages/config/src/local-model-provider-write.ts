@@ -8,11 +8,11 @@ import lockfile from 'proper-lockfile';
 import {
   getConfig,
   getConfigPath,
-  MINIMAX_API_MODEL_CATALOG,
+  KILO_API_MODEL_CATALOG,
   resetConfig,
   type Config,
 } from './config.js';
-import { MANAGED_MINIMAX_PROVIDER_ID, MINIMAX_API_PROVIDER_ID } from './model-availability.js';
+import { KILO_PROVIDER_ID, KILO_API_PROVIDER_ID } from './model-availability.js';
 
 const LOCAL_CONFIG_FILE_MODE = 0o600;
 const DANGEROUS_CONFIG_PATH_SEGMENTS = new Set(['__proto__', 'prototype', 'constructor']);
@@ -66,7 +66,7 @@ export async function replaceLocalManagedMinimaxProvider(
   return withLockedConfig(async (raw) => {
     raw.provider = {
       ...(isPlainRecord(raw.provider) ? raw.provider : {}),
-      [MANAGED_MINIMAX_PROVIDER_ID]: structuredClone(provider),
+      [KILO_PROVIDER_ID]: structuredClone(provider),
     };
     return { write: true, value: undefined };
   }).then(({ config }) => ({ config }));
@@ -166,7 +166,7 @@ export async function updateLocalModelSelection(
   }).then(({ config }) => ({ config }));
 }
 
-/** Compare, remote-test, and persist a managed MiniMax model Context under one config lock. */
+/** Compare, remote-test, and persist a managed Kilo model Context under one config lock. */
 export async function compareAndSetLocalModelContext(
   input: {
     readonly providerId: string;
@@ -178,22 +178,22 @@ export async function compareAndSetLocalModelContext(
 ): Promise<LocalModelContextCompareAndSetResult> {
   const modelId = input.modelId.trim();
   if (
-    (input.providerId !== MANAGED_MINIMAX_PROVIDER_ID &&
-      input.providerId !== MINIMAX_API_PROVIDER_ID) ||
+    (input.providerId !== KILO_PROVIDER_ID &&
+      input.providerId !== KILO_API_PROVIDER_ID) ||
     !modelId ||
     DANGEROUS_CONFIG_PATH_SEGMENTS.has(modelId)
   ) {
-    throw new LocalModelProviderConfigValidationError('Invalid MiniMax model context target');
+    throw new LocalModelProviderConfigValidationError('Invalid Kilo model context target');
   }
-  if (input.providerId === MINIMAX_API_PROVIDER_ID) {
-    const options = MINIMAX_API_MODEL_CATALOG[modelId]?.contextWindowOptions;
+  if (input.providerId === KILO_API_PROVIDER_ID) {
+    const options = KILO_API_MODEL_CATALOG[modelId]?.contextWindowOptions;
     if (!options?.includes(input.contextLimit)) {
-      throw new LocalModelProviderConfigValidationError('Invalid MiniMax API context limit');
+      throw new LocalModelProviderConfigValidationError('Invalid Kilo API context limit');
     }
   }
   const outcome = await withLockedConfig(async (raw, currentConfig) => {
     const currentContext =
-      input.providerId === MANAGED_MINIMAX_PROVIDER_ID
+      input.providerId === KILO_PROVIDER_ID
         ? currentConfig.provider?.[input.providerId]?.models?.[modelId]?.limit?.context
         : currentMinimaxApiContext(currentConfig, modelId);
     if (currentContext !== input.expectedContextLimit) {
@@ -201,7 +201,7 @@ export async function compareAndSetLocalModelContext(
     }
     if (!(await beforeCommit(currentConfig))) return { write: false, value: false };
     const path =
-      input.providerId === MANAGED_MINIMAX_PROVIDER_ID
+      input.providerId === KILO_PROVIDER_ID
         ? ['minimaxModelContextLimits', modelId]
         : ['minimax_api', 'modelContextLimits', modelId];
     setNestedValue(raw, path, input.contextLimit);
@@ -211,7 +211,7 @@ export async function compareAndSetLocalModelContext(
 }
 
 function currentMinimaxApiContext(config: Config, modelId: string): number | undefined {
-  const model = MINIMAX_API_MODEL_CATALOG[modelId];
+  const model = KILO_API_MODEL_CATALOG[modelId];
   const override = config.minimax_api?.modelContextLimits?.[modelId];
   return override !== undefined && model?.contextWindowOptions?.includes(override)
     ? override

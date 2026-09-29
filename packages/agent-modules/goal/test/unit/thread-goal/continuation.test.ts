@@ -3,12 +3,15 @@
  *
  * Pins: (a) the objective placeholder is substituted, (b) XML-escapable
  * characters in the objective do not break out of the <objective> block,
- * (c) the template still carries the codex-derived continuation guidance.
+ * (c) the template still carries the codex-derived continuation guidance,
+ * (d) the long-running-autonomy contract is present and every
+ * anti-premature-completion guardrail survived the hardening pass.
  */
 
 import { describe, expect, it } from "vitest";
 
 import {
+  GOAL_BLOCKED_AUDIT_THRESHOLD,
   renderContinuationPrompt,
   renderKickoffPrompt,
   renderNudgePrompt,
@@ -45,7 +48,41 @@ describe("thread-goal renderKickoffPrompt", () => {
     expect(prompt).toContain("Alignment routing:");
     expect(prompt).toContain("Completion audit:");
     expect(prompt).toContain("Blocked audit:");
+    expect(prompt).toContain("Durable progress:");
     expect(prompt).toContain("update_goal");
+  });
+
+  it("states that the run is uncapped and that ending a turn is not a stopping point", () => {
+    const prompt = renderKickoffPrompt({ objective: "x" });
+    expect(prompt).toContain("This goal is autonomous and long-running:");
+    expect(prompt).toContain(
+      "There is no Turn cap, no wall-clock cap, and no token cap unless the user set one",
+    );
+    expect(prompt).toContain("the runtime starts another turn for you");
+    expect(prompt).toContain(
+      'do not treat "the rest can be done later" as a stopping point',
+    );
+  });
+
+  it("forbids handing the objective back or redefining it as smaller", () => {
+    const prompt = renderKickoffPrompt({ objective: "x" });
+    expect(prompt).toContain("Do not abandon the objective.");
+    expect(prompt).toContain(
+      "is a failure of this goal, not a completion of it",
+    );
+    // The anti-scope-shrink guardrail must survive the hardening pass.
+    expect(prompt).toContain(
+      "do not redefine success around a smaller or easier task",
+    );
+    expect(prompt).toContain("scope reduction is not");
+  });
+
+  it("requires progress to be written down so a new turn can resume it", () => {
+    const prompt = renderKickoffPrompt({ objective: "x" });
+    expect(prompt).toContain(
+      "progress you only hold in your head is progress you will lose",
+    );
+    expect(prompt).toContain("Re-read that durable state at the start of a turn");
   });
 
   it("checks terminal outcomes before continuing and immediately blocks a safety refusal", () => {
@@ -65,7 +102,7 @@ describe("thread-goal renderKickoffPrompt", () => {
       "Do not retry the unsafe work or repeat the same refusal",
     );
     expect(prompt).toContain(
-      "does not wait for the three-consecutive-turn blocked threshold",
+      "does not wait for the consecutive-turn blocked threshold",
     );
     expect(prompt).toContain(
       "After a user resumes the goal, a safety/policy refusal remains immediate",
@@ -81,26 +118,54 @@ describe("thread-goal renderKickoffPrompt", () => {
     expect(prompt).toContain("single-choice or confirmation question");
   });
 
-  it("completes when executable work is done and only a passive user wait remains", () => {
+  it("explains that an unanswered question auto-resolves to its recommended option", () => {
     const prompt = renderKickoffPrompt({ objective: "x" });
     expect(prompt).toContain(
-      "all executable requested work is finished and only a passive wait for the user's next arbitrary message remains",
+      "the runtime automatically answers it with that question's recommended option",
+    );
+    expect(prompt).toContain("recommended: true");
+    // `requiresExplicitResponse` suppresses the auto-answer and parks the goal,
+    // so it must be reserved rather than used as the default safety net.
+    expect(prompt).toContain("Alignment is a step, not a stop.");
+    expect(prompt).toContain("suppresses that automatic answer and parks the goal");
+    expect(prompt).toContain("Never use it for");
+  });
+
+  it("never treats a passive wait for the user as completion", () => {
+    // Regression guard for the premature-termination rule this hardening pass
+    // removed: an objective that is merely "waiting for the next user message"
+    // is an unfinished objective, and reporting it complete strands a Goal the
+    // user never asked to close.
+    const prompt = renderKickoffPrompt({ objective: "x" });
+    expect(prompt).not.toContain("passive wait");
+    expect(prompt).not.toContain("only a passive wait");
+    expect(prompt).not.toContain("treat that wait as a stop condition");
+  });
+
+  it("gates blocked on a long-run threshold rather than three turns", () => {
+    const prompt = renderKickoffPrompt({ objective: "x" });
+    expect(prompt).not.toContain("three consecutive goal turns");
+    expect(prompt).not.toContain("three consecutive resumed goal turns");
+    expect(GOAL_BLOCKED_AUDIT_THRESHOLD).toBe(10);
+    expect(prompt).toContain(
+      `at least ${GOAL_BLOCKED_AUDIT_THRESHOLD} consecutive goal turns`,
     );
     expect(prompt).toContain(
-      "treat that wait as a stop condition, not unfinished work",
+      `at least ${GOAL_BLOCKED_AUDIT_THRESHOLD} consecutive resumed goal turns`,
     );
+    // A new approach is what resets the counter, so the audit cannot deadlock
+    // a run that is genuinely trying different things.
+    expect(prompt).toContain("A new approach resets the count.");
     expect(prompt).toContain(
-      'immediately call update_goal with mode "status" and status "complete"',
+      "Blocked is terminal: it ends the run until the user resumes the goal",
     );
-    expect(prompt).toContain('Do not use status "blocked" for this case');
-    expect(prompt).toContain("Do not emit a waiting placeholder");
   });
 
   it("keeps ordinary uncertainty moving without ask_user", () => {
     const prompt = renderKickoffPrompt({ objective: "x" });
     expect(prompt).toContain("ordinary engineering uncertainty");
     expect(prompt).toContain("do not ask");
-    expect(prompt).toContain("Continue making progress and verify");
+    expect(prompt).toContain("continue making progress and verify");
   });
 
   it("keeps user-answerable ambiguity out of blocked status", () => {
@@ -109,6 +174,18 @@ describe("thread-goal renderKickoffPrompt", () => {
       'Do not use status "blocked" for a specific question the user can answer',
     );
     expect(prompt).toContain("call ask_user and leave the goal active instead");
+  });
+
+  it("requires requirement-by-requirement evidence rather than a summary claim", () => {
+    const prompt = renderKickoffPrompt({ objective: "x" });
+    expect(prompt).toContain("treat completion as unproven");
+    expect(prompt).toContain(
+      "The audit must prove completion, not merely fail to find obvious remaining work",
+    );
+    expect(prompt).toContain(
+      '"Everything I was asked to do is done" is not the audit.',
+    );
+    expect(prompt).toContain("Do not rely on intent, partial progress, memory of earlier work");
   });
 
   it("contains no token / budget references (MVP has no budget)", () => {
@@ -148,12 +225,13 @@ describe("thread-goal renderContinuationPrompt", () => {
 
     expect(prompt).toContain("Continue working toward the active thread goal");
     expect(prompt).toContain(
-      "follow the goal contract from the kickoff context",
+      "This goal is uncapped unless the user set a budget, so this turn ending is not a stopping point",
     );
+    expect(prompt).toContain("re-read your durable notes");
     expect(prompt).not.toContain("Secret objective text");
     expect(prompt).not.toContain("<objective>");
     expect(prompt).not.toContain("Completion audit:");
-    expect(prompt.length).toBeLessThan(400);
+    expect(prompt.length).toBeLessThan(500);
   });
 
   it("appends bounded, escaped not_met feedback without repeating the objective", () => {
@@ -214,6 +292,11 @@ describe("thread-goal renderNudgePrompt", () => {
       "Your latest final response repeated an earlier final response",
     );
     expect(prompt).toContain("materially different next action");
+    // The nudge has to say that repeating is what ends the run, otherwise it
+    // reads as a request to try the same thing once more.
+    expect(prompt).toContain(
+      "repeating yourself is the only way it ever ends early",
+    );
   });
 
   it("states the tool-less streak instead of a repeat when only that condition fired", () => {
@@ -224,6 +307,7 @@ describe("thread-goal renderNudgePrompt", () => {
     });
 
     expect(prompt).toContain("ended without using a single tool");
+    expect(prompt).toContain("it is not a way to end the run either");
     expect(prompt).not.toContain("repeated an earlier final response");
   });
 
@@ -275,6 +359,15 @@ describe("thread-goal renderRecoveryPrompt", () => {
     );
     expect(prompt).not.toContain("Secret objective text");
   });
+
+  it("resumes from durable notes instead of restarting the investigation", () => {
+    // A crash mid-run is the normal case for a long autonomous Goal, and
+    // re-deriving already-settled work is the most expensive way to waste it.
+    const prompt = renderRecoveryPrompt({ objective: "x" });
+    expect(prompt).toContain("Recovering is not restarting");
+    expect(prompt).toContain("keep whatever durable notes and plan you already wrote");
+    expect(prompt).toContain("A recovery is not a reason to stop early.");
+  });
 });
 
 describe("thread-goal terminal audit reminders", () => {
@@ -287,6 +380,13 @@ describe("thread-goal terminal audit reminders", () => {
     expect(prompt).toContain("call get_goal");
     expect(prompt).toContain('call update_goal with status "complete"');
     expect(prompt).toContain("do not call update_goal merely as a heartbeat");
+    expect(prompt).not.toContain("Secret objective text");
+  });
+
+  it("frames the checkpoint as a review, never as a stopping point", () => {
+    const prompt = renderTerminalAuditPrompt({ objective: "x" });
+    expect(prompt).toContain("This checkpoint is a review, not a stopping point");
+    expect(prompt).toContain("catch a premature completion claim");
   });
 
   it("deduplicates get_goal when recovery and the audit coincide", () => {
@@ -298,5 +398,6 @@ describe("thread-goal terminal audit reminders", () => {
     expect(prompt.match(/call get_goal/g)).toHaveLength(1);
     expect(prompt).toContain("retracted Turn or Runtime recovery");
     expect(prompt).toContain("scheduled five-Turn checkpoint");
+    expect(prompt).toContain("Resume the full objective from your durable notes");
   });
 });

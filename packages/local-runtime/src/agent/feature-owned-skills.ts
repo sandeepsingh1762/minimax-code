@@ -4,7 +4,10 @@ import {
   type AgentBuiltinSkillId,
   type ResolvedAgentCapabilities,
 } from '@mavis/config';
-import { isCanonicalSubagentRole } from '@mavis/agent-tools/desktop/subagent-roles';
+import {
+  isCanonicalSubagentRole,
+  isReadOnlyCanonicalSubagentRole,
+} from '@mavis/agent-tools/desktop/subagent-roles';
 
 import { CU_DESKTOP_SKILL_NAME } from '../cu/gate.js';
 
@@ -35,11 +38,14 @@ export function resolveFeatureAwareBuiltinSkillNames(
   ) {
     selected.add('miniapp-creator');
   }
+  // The computer-use Skill drives a real desktop, so it is withheld from every
+  // canonical role whose tool ceiling is read-only (explore, verifier, recon) —
+  // the same classification the native-tool and filesystem ceilings use.
   const canonicalBuiltinReadonly =
     gates.builtinAgent === true &&
     gates.canonicalRole !== undefined &&
     isCanonicalSubagentRole(gates.canonicalRole) &&
-    (gates.canonicalRole === 'explore' || gates.canonicalRole === 'verifier');
+    isReadOnlyCanonicalSubagentRole(gates.canonicalRole);
   if (gates.cuModeActive && !canonicalBuiltinReadonly) selected.add(CU_DESKTOP_SKILL_NAME);
   if (gates.resumeCodexAvailable === true && isAgentBuiltinToolEnabled(capabilities, 'bash')) {
     selected.add('resume-codex');

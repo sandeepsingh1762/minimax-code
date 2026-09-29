@@ -1,4 +1,5 @@
 import { InvalidArgumentError, Option, type Command } from 'commander';
+import { AGENT_PROMPT_MODES } from '@mavis/local-runtime-v2/process-local';
 import { parseHeadlessModelOverride } from '../headless/model-selection.js';
 import type { TuiMode } from '../tui/engine/public.js';
 import { parseTuiStartupEnvironment } from './environment.js';
@@ -113,8 +114,11 @@ export function applyExecCliContract(command: Command): Command {
     .addOption(new Option('--model <provider/model>', 'override the model for this Run only'))
     .addOption(new Option('--effort <level>', 'override the reasoning effort for this Run only'))
     .addOption(
-      new Option('--prompt-mode <mode>', 'Prompt mode: tui, coding, or work')
-        .choices(['tui', 'coding', 'work'])
+      new Option(
+        '--prompt-mode <mode>',
+        `Prompt mode: ${AGENT_PROMPT_MODES.join(', ')}`,
+      )
+        .choices([...AGENT_PROMPT_MODES])
         .default('tui'),
     )
     .addOption(new Option('--session <id>', 'run in an existing active Session'))

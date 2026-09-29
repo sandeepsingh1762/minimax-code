@@ -1,5 +1,6 @@
 import type { PiBeforeToolCallHook } from '@mavis/agent-core/pi-turn-runner';
 import { isRuntimeToolInputValid } from '@mavis/agent-core/tools';
+import { isReadOnlyCanonicalSubagentRole } from '@mavis/agent-tools/desktop/subagent-roles';
 
 import type { AgentExecutionSnapshot } from '../preparation/contracts.js';
 import type { AgentHostSteeringMessage, LocalTurnExecutionInput } from '../runner/contracts.js';
@@ -254,8 +255,14 @@ function createToolContext(
   const identity = readTrustedBuiltinAgentProfileIdentity(
     execution.preparation.agentConfig.agent_profile,
   );
+  // One read-only classification serves the native-tool ceiling, the Skill
+  // catalog, and this filesystem fence, so a role cannot look read-only in one
+  // layer while another lets it write. Explore, Verifier and Recon are
+  // read-only; the offensive roles are write-capable by design.
   const forceReadOnlyFilesystem =
-    identity.trustedBuiltin && identity.canonicalViewName === 'explore';
+    identity.trustedBuiltin &&
+    identity.canonicalViewName !== undefined &&
+    isReadOnlyCanonicalSubagentRole(identity.canonicalViewName);
   return {
     sessionId: execution.lease.sessionId,
     turnId: execution.lease.turnId,

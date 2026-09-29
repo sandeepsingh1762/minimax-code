@@ -903,7 +903,14 @@ export class TuiFeatureFlow {
     }
   }
 
-  async showProviderManager(): Promise<void> {
+  async setMiniMaxApiKey(apiKey: string): Promise<void> {
+    await this.providerApplication.setMiniMaxApiKey(apiKey, true);
+    await this.modelState.refresh();
+    this.options.controller.refreshStatusMetricsNow();
+    this.options.append('Kilo API Key saved and selected for gateway requests.');
+  }
+
+  async showProviderManager(options?: { startWithKey?: boolean }): Promise<void> {
     if (this.isStopped()) return;
     this.closeProviderManager();
     const loadSequence = ++this.providerLoadSequence;
@@ -915,7 +922,7 @@ export class TuiFeatureFlow {
         this.options.append(
           formatTuiActionFailure(error, {
             summary: "Couldn't load providers.",
-            nextStep: 'Retry /provider.',
+            nextStep: 'Retry /provider or /connect.',
           }),
           'warning',
         );
@@ -934,6 +941,7 @@ export class TuiFeatureFlow {
     };
     const manager = new TuiProviderManager({
       snapshot,
+      startWithKey: options?.startWithKey,
       onRefresh: refresh,
       onTest: (providerId, modelId) => this.providerApplication.test(providerId, modelId),
       onConnectCodex: () => {

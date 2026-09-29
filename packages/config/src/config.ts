@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import yaml from "js-yaml";
 import { parseTuiConfig, type TuiConfig } from "./tui-config.js";
 import {
+  applyKiloCredential,
   applyManagedMinimaxContextLimits,
   applyRequiredProviderOverrides,
   migrateLegacyByokProvidersOnDisk,
@@ -47,6 +48,7 @@ import {
   type AgentRuntimeConfig,
 } from "./agent-runtime-config.js";
 import { resolveDataDir } from "./data-dir.js";
+import { KILO_DEFAULT_MODEL, KILO_GATEWAY_BASE_URL, KILO_MODEL_CATALOG, KILO_PROVIDER_ID, buildKiloProviderEntry } from "./kilo-provider.js";
 import type { ProviderAuthMode } from "./provider-auth-mode.js";
 import { parseAgentsConfig, type AgentsConfig } from "./agent-capabilities.js";
 import {
@@ -855,6 +857,49 @@ export interface MemoryConfig {
   dailyDigest: DailyDigestConfig;
 }
 
+export interface PentestConfig {
+  /**
+   * Master switch for the offensive-security capability surface.
+   *
+   * When false, no engagement tool is assembled for any turn: neither
+   * `pentest_probe` (active network probing) nor `pentest_findings` (the
+   * durable vulnerability ledger). The ledger file is never created and an
+   * already-written one is left untouched, so disabling the surface stops all
+   * new access without destroying recorded findings.
+   *
+   * Default: true. The tools are still capability-gated per agent, so a
+   * read-only mapping role never receives them regardless of this value.
+   */
+  enabled: boolean;
+  /**
+   * Whether `pentest_probe` may be assembled at all.
+   *
+   * This is the network-reach switch and is deliberately separate from
+   * `enabled`. Turning the whole surface off also turns this off, but a
+   * deployment can keep the offline ledger while refusing to emit a single
+   * packet — for example while reviewing a report, or on a laptop that must
+   * not touch in-scope hosts.
+   *
+   * Default: true.
+   */
+  probeEnabled: boolean;
+  /**
+   * Hosts and CIDRs the agent is authorized to assess, one entry per line in
+   * YAML, e.g. `["shop.test", "10.0.0.0/8"]`.
+   *
+   * When non-empty, `pentest_probe` refuses to send a packet to anything
+   * outside this list, which keeps an autonomous run from drifting off scope
+   * after a redirect, a discovered hostname, or a third-party dependency. An
+   * empty list means "no restriction beyond the permission system", which is
+   * the correct default for an operator who is scoping the run interactively.
+   *
+   * Matching is exact for hosts and suffix-anchored for wildcards
+   * (`*.shop.test`). CIDR entries are matched against the resolved address of
+   * the probed target.
+   */
+  scope: string[];
+}
+
 export interface ContextManagementConfig {
   /**
    * Models for which the per-message `<system-reminder>` injection is fully
@@ -975,6 +1020,8 @@ export interface Config {
   agents: AgentsConfig;
   /** Memory feature controls. */
   memory: MemoryConfig;
+  /** Offensive-security engagement surface controls. */
+  pentest: PentestConfig;
   /** Skill self-evolution configuration. */
   skillEvolve: SkillEvolveConfig;
   /** Session rotation configuration. */
@@ -1516,73 +1563,32 @@ export function getConfigPath(): string {
 // Default provider presets per environment combo (MAVIS_REGION x MAVIS_BUILD_ENV)
 // ---------------------------------------------------------------------------
 
-const MINIMAX_M3_FILE_API_CAPABILITIES: ModelCapabilitiesConfig = {
-  support_files_api: true,
-  files_api_upload_endpoint: "/v1/files/upload",
-  max_image_bytes_inline: 10_485_760,
-  max_video_bytes_inline: 52_428_800,
-  max_request_body_bytes: 67_108_864,
-  max_attachments_count: 4,
-};
+/**
+ * First-party model catalog for the default route.
+ *
+ * Kilo is the provider of record; its catalog, gateway origin, credential
+ * resolution and fallback chain all live in ./kilo-provider.ts so this file
+ * cannot drift from the provider implementation.
+ */
+export const KILO_API_MODEL_CATALOG: Record<string, ModelConfig> = KILO_MODEL_CATALOG;
 
-const MINIMAX_MODELS: Record<string, ModelConfig> = {
-  "MiniMax-M3": {
-    name: "MiniMax-M3",
-    attachment: true,
-    reasoning: true,
-    tool_call: true,
-    temperature: true,
-    modalities: { input: ["text", "image", "video"], output: ["text"] },
-    limit: { context: 512000, output: 128000 },
-    contextWindowOptions: [512000, 1000000],
-    contextWindowOptionHints: { "1000000": "higher_usage" },
-    options: { reasoningSummary: "auto" },
-    thinking_config: { mode: "switchable", default_value: "true" },
-    variants: {
-      "none-thinking": { thinking: { type: "disabled" } },
-      thinking: { thinking: { type: "adaptive" } },
-    },
-    capabilities: MINIMAX_M3_FILE_API_CAPABILITIES,
-  },
-  "MiniMax-M2.7-highspeed": {
-    name: "MiniMax-M2.7-highspeed",
-    attachment: false,
-    reasoning: true,
-    tool_call: true,
-    temperature: true,
-    modalities: { input: ["text"], output: ["text"] },
-    limit: { context: 200000, output: 128000 },
-  },
-  "MiniMax-M2.7": {
-    name: "MiniMax-M2.7",
-    attachment: false,
-    reasoning: true,
-    tool_call: true,
-    temperature: true,
-    modalities: { input: ["text"], output: ["text"] },
-    limit: { context: 200000, output: 128000 },
-  },
-};
-
-/** MiniMax models the user's own API key may call and the first-run managed fallback. */
-export const MINIMAX_API_MODEL_CATALOG: Record<string, ModelConfig> =
-  MINIMAX_MODELS;
-
+/**
+ * The builtin provider is Kilo, which serves one gateway origin for every
+ * region/build combination. The preset map is retained so preset-keyed lookups
+ * keep working, but every key resolves to the same Kilo endpoint.
+ */
 const PRESET_BASE_URLS: Record<PresetKey, string> = {
-  "cn-test": "https://matrix-test.example.invalid/mavis/api/v1/llm/v1",
-  "cn-dev": "https://matrix-test.example.invalid/mavis/api/v1/llm/v1",
-  "cn-staging": "https://matrix-pre.example.invalid/mavis/api/v1/llm/v1",
-  "en-test": "https://matrix-overseas-test.example.invalid/mavis/api/v1/llm/v1",
-  "en-dev": "https://matrix-overseas-test.example.invalid/mavis/api/v1/llm/v1",
-  "en-staging":
-    "https://matrix-overseas-pre.example.invalid/mavis/api/v1/llm/v1",
-  "cn-prod": "https://agent.minimax.cn/mavis/api/v1/llm/v1",
-  "en-prod": "https://agent.minimax.io/mavis/api/v1/llm/v1",
+  "cn-test": KILO_GATEWAY_BASE_URL,
+  "cn-dev": KILO_GATEWAY_BASE_URL,
+  "cn-staging": KILO_GATEWAY_BASE_URL,
+  "cn-prod": KILO_GATEWAY_BASE_URL,
+  "en-test": KILO_GATEWAY_BASE_URL,
+  "en-dev": KILO_GATEWAY_BASE_URL,
+  "en-staging": KILO_GATEWAY_BASE_URL,
+  "en-prod": KILO_GATEWAY_BASE_URL,
 };
 
-const LEGACY_MANAGED_PRESET_BASE_URLS = [
-  "https://agent.minimaxi.com/mavis/api/v1/llm/v1",
-] as const;
+const LEGACY_MANAGED_PRESET_BASE_URLS = [] as const;
 const MANAGED_PRESET_BASE_URLS = new Set([
   ...Object.values(PRESET_BASE_URLS),
   ...LEGACY_MANAGED_PRESET_BASE_URLS,
@@ -1608,7 +1614,7 @@ function isManagedPresetBaseUrl(baseURL: string): boolean {
   }
 }
 
-/** Test desktop builds may route the builtin managed MiniMax provider through a local fault proxy. */
+/** Test desktop builds may route the builtin managed Kilo provider through a local fault proxy. */
 export function allowsManagedMinimaxProviderOverride(): boolean {
   return getRuntimeBuildEnv() === "test";
 }
@@ -1616,6 +1622,20 @@ export function allowsManagedMinimaxProviderOverride(): boolean {
 function shouldEnforceManagedProviderProtection(): boolean {
   return !allowsManagedMinimaxProviderOverride();
 }
+
+/**
+ * Managed entries the on-disk baseURL sync is allowed to repair.
+ *
+ * `KILO_PROVIDER_ID` is the current managed key. `LEGACY_MANAGED_PRESET_PROVIDER_ID`
+ * is the key a profile written before the Kilo gateway still carries: it is not a
+ * live route any more, but its stale endpoint still belongs to the managed origin
+ * and must be repaired so the profile does not keep calling an earlier path.
+ */
+const LEGACY_MANAGED_PRESET_PROVIDER_ID = "minimax";
+const MANAGED_PRESET_PROVIDER_IDS = [
+  KILO_PROVIDER_ID,
+  LEGACY_MANAGED_PRESET_PROVIDER_ID,
+] as const;
 
 function syncManagedPresetBaseUrl(configPath: string): void {
   if (!isManagedRuntime() || !fs.existsSync(configPath)) {
@@ -1631,26 +1651,27 @@ function syncManagedPresetBaseUrl(configPath: string): void {
   )
     return;
 
-  const { minimax } = provider as Record<string, unknown>;
-  if (minimax == null || typeof minimax !== "object" || Array.isArray(minimax))
-    return;
-
-  const { options } = minimax as Record<string, unknown>;
-  if (options == null || typeof options !== "object" || Array.isArray(options))
-    return;
-
-  const currentBaseURL = (options as Record<string, unknown>).baseURL;
-  if (typeof currentBaseURL !== "string") return;
-
   const presetBaseURL = PRESET_BASE_URLS[getRuntimePresetKey()];
-  if (
-    currentBaseURL === presetBaseURL ||
-    !isManagedPresetBaseUrl(currentBaseURL)
-  )
-    return;
+  const staleOptions: Array<Record<string, unknown>> = [];
+  for (const providerId of MANAGED_PRESET_PROVIDER_IDS) {
+    const entry = (provider as Record<string, unknown>)[providerId];
+    if (entry == null || typeof entry !== "object" || Array.isArray(entry))
+      continue;
+
+    const { options } = entry as Record<string, unknown>;
+    if (options == null || typeof options !== "object" || Array.isArray(options))
+      continue;
+
+    const currentBaseURL = (options as Record<string, unknown>).baseURL;
+    if (typeof currentBaseURL !== "string") continue;
+    if (currentBaseURL === presetBaseURL) continue;
+    if (!isManagedPresetBaseUrl(currentBaseURL)) continue;
+    staleOptions.push(options as Record<string, unknown>);
+  }
+  if (staleOptions.length === 0) return;
 
   const originalContent = fs.readFileSync(configPath);
-  (options as Record<string, unknown>).baseURL = presetBaseURL;
+  for (const options of staleOptions) options.baseURL = presetBaseURL;
   try {
     writePrivateConfigFileSync(
       configPath,
@@ -1673,20 +1694,16 @@ function syncManagedPresetBaseUrl(configPath: string): void {
   }
 }
 
-function buildPresetEntry(key: PresetKey) {
-  const provider: ProviderConfig = {
-    name: "MiniMax",
-    npm: "@ai-sdk/anthropic",
-    options: {
-      authMode: "managed-login",
-      apiKey: "sk-xxx",
-      baseURL: PRESET_BASE_URLS[key],
-    },
-    models: MINIMAX_MODELS,
-  };
+/**
+ * Build the first-run provider preset. Kilo is an OpenAI-compatible BYOK
+ * gateway, so there is no managed-login auth mode and no placeholder key: the
+ * credential is supplied by KILO_API_KEY or the lock-protected BYOK config.
+ */
+function buildPresetEntry(_key: PresetKey) {
+  const provider = buildKiloProviderEntry();
   return {
-    provider: { minimax: provider } as ModelsConfig,
-    defaultModel: "minimax/MiniMax-M3",
+    provider: { kilo: provider } as ModelsConfig,
+    defaultModel: `kilo/${KILO_DEFAULT_MODEL}`,
   };
 }
 
@@ -1741,6 +1758,11 @@ const DEFAULTS: Omit<
     dailyDigest: {
       enabled: false,
     },
+  },
+  pentest: {
+    enabled: true,
+    probeEnabled: true,
+    scope: [],
   },
   skillEvolve: {
     enabled: true,
@@ -1979,15 +2001,24 @@ export function resolveConfigFromRaw(
     raw.minimaxModelContextLimits,
   );
   const beta = parseBetaConfig(raw);
+  // The Kilo credential is resolved at read time (env first, then whatever the
+  // user already stored) so it never has to be written into config.yaml.
+  const kiloPresetProvider = DEFAULT_MODEL_PRESETS[getRuntimePresetKey()].provider[
+    KILO_PROVIDER_ID
+  ] as ProviderConfig | undefined;
 
   return {
     logLevel:
       typeof raw.logLevel === "string" ? raw.logLevel : DEFAULTS.logLevel,
     devPort,
     ...managedProvider,
-    provider: applyManagedMinimaxContextLimits(
-      managedProvider.provider,
-      minimaxModelContextLimits,
+    provider: applyKiloCredential(
+      applyManagedMinimaxContextLimits(
+        managedProvider.provider,
+        minimaxModelContextLimits,
+      ),
+      kiloPresetProvider,
+      (raw.minimax_api as Record<string, unknown> | undefined)?.apiKey as string | undefined,
     ),
     defaultModelVariant:
       typeof raw.defaultModelVariant === "string"
@@ -2084,6 +2115,7 @@ export function resolveConfigFromRaw(
     beta,
     agents: parseAgentsConfig(raw.agents),
     memory: parseMemoryConfig(raw),
+    pentest: parsePentestConfig(raw),
     skillEvolve: parseSkillEvolveConfig(raw, beta),
     sessionRotate: parseSessionRotateConfig(raw),
     agentStop: parseAgentStopDetectorConfig(raw),
@@ -2125,6 +2157,38 @@ function parseTelemetryConfig(raw: unknown): TelemetryConfig {
     enabled: typeof enabled === "boolean" ? enabled : DEFAULTS.telemetry.enabled,
     metrics: Reflect.get(raw, "metrics") === true,
     diagnostics: Reflect.get(raw, "diagnostics") === true,
+  };
+}
+
+/**
+ * Pentest config parsing. Kept permissive on purpose: a malformed scope list
+ * degrades to "no configured scope" rather than failing startup, because
+ * refusing to boot is a worse outcome than a scope the operator has to
+ * re-enter. The `probeEnabled` switch is the hard control and never degrades.
+ */
+function parsePentestConfig(raw: Record<string, unknown>): PentestConfig {
+  const pentestRaw = raw.pentest;
+  const pentestObj =
+    pentestRaw != null && typeof pentestRaw === "object" && !Array.isArray(pentestRaw)
+      ? (pentestRaw as Record<string, unknown>)
+      : {};
+  const scopeRaw = pentestObj.scope;
+  const scope = Array.isArray(scopeRaw)
+    ? scopeRaw
+        .filter((entry): entry is string => typeof entry === "string")
+        .map((entry) => entry.trim())
+        .filter((entry) => entry.length > 0)
+    : [];
+  return {
+    enabled:
+      typeof pentestObj.enabled === "boolean" ? pentestObj.enabled : DEFAULTS.pentest.enabled,
+    // Probing is subordinate to the master switch: a disabled surface can never
+    // silently regain network reach through this flag alone.
+    probeEnabled:
+      typeof pentestObj.probeEnabled === "boolean"
+        ? pentestObj.probeEnabled && DEFAULTS.pentest.enabled
+        : DEFAULTS.pentest.enabled,
+    scope,
   };
 }
 

@@ -21,6 +21,7 @@ import type {
 } from '../contracts.js';
 import type { AgentHostTurnCapabilityView } from '../../assembly/turn-capability-lifecycle.js';
 import {
+  KILO_PROVIDER_ID,
   isLegacyMinimaxProvider,
   modelConfigForRef,
   modelRefForModel,
@@ -355,7 +356,7 @@ function usesSavedModelLimits(
   if (!input.model) return true;
   return (
     input.session.sessionKind === 'task' &&
-    (providerId !== 'minimax' || config.minimaxModelSource === 'minimax_api_key')
+    (providerId !== KILO_PROVIDER_ID || config.minimaxModelSource === 'minimax_api_key')
   );
 }
 
@@ -1003,7 +1004,7 @@ function modelRefForSelection(
     {
       managed:
         !legacyFrozenSelection &&
-        selection.providerId === 'minimax' &&
+        selection.providerId === KILO_PROVIDER_ID &&
         config.minimaxModelSource !== 'minimax_api_key',
       ...(selection.variant !== undefined ? { variant: selection.variant } : {}),
       ...(selection.parameterSnapshot ? { parameterSnapshot: selection.parameterSnapshot } : {}),

@@ -17,11 +17,23 @@ export interface GoalConfig {
    */
   verification?: GoalVerificationMode;
   budget: {
-    /** Optional worker token cap for Goals without a per-Goal token budget. */
-    defaultTokens?: number;
-    /** Optional worker Turn cap. */
+    /**
+     * Optional worker token cap for Goals without a per-Goal token budget.
+     *
+   * Deliberately has no default. An uncapped budget is the *chosen* default
+   * for a Goal — the feature exists to work a mission "for however long it
+   * takes" — so the absence of these three keys is policy, not omission. See
+   * the {@link GOAL_CONFIG_DEFAULTS} comment.
+   */
+  defaultTokens?: number;
+    /**
+     * Optional worker Turn cap. No default, same reason as {@link defaultTokens}.
+     */
     defaultMainTurns?: number;
-    /** Optional active execution-time cap. */
+    /**
+     * Optional active execution-time cap. No default, same reason as
+     * {@link defaultTokens}.
+     */
     defaultActiveSeconds?: number;
     graceSteps: number;
   };
@@ -63,8 +75,39 @@ export const GOAL_CONFIG_DEFAULTS: GoalConfig = {
   budget: {
     graceSteps: 1,
   },
-  breaker: { repeatedReplyLimit: 3 },
-  verifier: { repeatedNotMetLimit: 5, evidence: 'brief' },
+  /*
+   * Autonomy policy: an unbudgeted Goal is uncapped, so these two breakers are
+   * the only limiters on a long unattended run.
+   *
+   * `budget` above deliberately has no `defaultTokens` / `defaultMainTurns` /
+   * `defaultActiveSeconds`. That absence is the chosen default, not a gap: the
+   * feature exists to work a mission "for however long it takes". A Goal runs
+   * until its objective is proven complete, the user stops it, a budget the user
+   * *did* set runs out, or one of the two bounded breakers below fires. Nothing
+   * downstream may synthesize a cap of its own.
+   *
+   * `repeatedReplyLimit` counts total identical final replies: the first is the
+   * baseline, and a nudge starts at the second. A long run legitimately
+   * re-derives the same summary — after a long tool call, after a context
+   * compaction, while re-checking a wall it already hit — and a limit of 3
+   * paused the Goal on the third of those, killing runs that were about to make
+   * progress. 8 still bounds the loop hard: eight byte-identical final replies
+   * in a row means the model is not advancing, and a `paused` Goal is cheap to
+   * recover because any explicit user Turn resets the breaker.
+   *
+   * `repeatedNotMetLimit` counts consecutive verifier rejections whose missing
+   * set is unchanged. A strict requirement-by-requirement auditor rejects a
+   * long objective many times while the tail is chased down; 5 stopped that
+   * routinely. 10 is the point at which "not converging" is a fair reading, and
+   * a genuinely impossible objective has its own `impossible` verdict. It also
+   * matches the blocked-audit threshold in the goal prompt, so the two
+   * convergence signals cannot disagree.
+   *
+   * Both stay bounded by GOAL_CONFIG_LIMITS below, so no configuration can turn
+   * a breaker into a no-op.
+   */
+  breaker: { repeatedReplyLimit: 8 },
+  verifier: { repeatedNotMetLimit: 10, evidence: 'brief' },
   evaluator: {
     modelPolicy: 'same-route-small-fast',
     maxTokens: 32_000,
@@ -75,6 +118,15 @@ export const GOAL_CONFIG_DEFAULTS: GoalConfig = {
 
 export const GOAL_CONFIG_LIMITS = {
   budget: { graceSteps: 3 },
+  /**
+   * Hard ceilings for the two breakers. A Goal is unbounded by budget on
+   * purpose; the breakers are the safety net that makes that safe, so a
+   * configuration may raise their thresholds but may not remove them. Without
+   * these maxima `repeatedReplyLimit: 1000000` would be a legal, permanent
+   * silent disable of the only stop the loop has.
+   */
+  breaker: { repeatedReplyLimit: 64 },
+  verifier: { repeatedNotMetLimit: 64 },
   evaluator: { maxRetries: 1 },
 } as const;
 
@@ -213,7 +265,7 @@ export function parseGoalConfig(raw: unknown): GoalConfigParseResult {
           'goal.breaker.repeatedReplyLimit',
           GOAL_CONFIG_DEFAULTS.breaker.repeatedReplyLimit,
           warnings,
-          { min: 1 },
+          { min: 1, max: GOAL_CONFIG_LIMITS.breaker.repeatedReplyLimit },
         ),
       },
       verifier: {
@@ -222,7 +274,7 @@ export function parseGoalConfig(raw: unknown): GoalConfigParseResult {
           'goal.verifier.repeatedNotMetLimit',
           GOAL_CONFIG_DEFAULTS.verifier.repeatedNotMetLimit,
           warnings,
-          { min: 1 },
+          { min: 1, max: GOAL_CONFIG_LIMITS.verifier.repeatedNotMetLimit },
         ),
         evidence: goalEnum(
           verifier.evidence,

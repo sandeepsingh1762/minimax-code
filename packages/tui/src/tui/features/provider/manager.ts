@@ -30,6 +30,7 @@ type ProviderManagerMode =
 
 export interface TuiProviderManagerOptions {
   snapshot: McodeProviderSnapshot;
+  startWithKey?: boolean;
   onRefresh(): Promise<McodeProviderSnapshot>;
   onRefreshModels?(provider: McodeProviderView): Promise<number>;
   onTest(providerId: string, modelId?: string): Promise<McodeProviderTestResult>;
@@ -60,6 +61,10 @@ export class TuiProviderManager implements Component, Focusable {
     this.selectedIndex = Math.max(0, activeIndex);
     this.secretInput.onSubmit = (value) => this.submitMiniMaxKey(value);
     this.secretInput.onEscape = () => this.exitMode();
+    if (options.startWithKey) {
+      const apiKeyProvider = this.providers().find((provider) => provider.kind === 'minimax-api-key');
+      this.mode = { kind: 'minimax-key', replacing: Boolean(apiKeyProvider?.hasApiKey) };
+    }
   }
 
   get focused(): boolean {
@@ -206,7 +211,7 @@ export class TuiProviderManager implements Component, Focusable {
       frameTop(width),
       frameRow(
         chalk.bold.hex(colors.signal)(
-          replacing ? 'Replace MiniMax API Key' : 'Configure MiniMax API Key',
+          replacing ? 'Replace Kilo / MiniMax API Key' : 'Configure Kilo / MiniMax API Key',
         ),
         width,
       ),

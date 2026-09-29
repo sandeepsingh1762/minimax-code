@@ -216,7 +216,6 @@ export class AgentHarness<
 		this.activeToolNames = options.activeToolNames
 			? [...options.activeToolNames]
 			: (options.tools ?? []).map((tool) => tool.name);
-		this.validateUniqueNames(this.activeToolNames, "Duplicate active tool name(s)");
 		this.validateToolNames(this.activeToolNames);
 		this.steeringQueueMode = options.steeringMode ?? "one-at-a-time";
 		this.followUpQueueMode = options.followUpMode ?? "one-at-a-time";

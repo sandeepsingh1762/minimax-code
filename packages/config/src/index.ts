@@ -29,7 +29,7 @@ export {
   isManagedRuntime,
   getRuntimePresetKey,
   DEFAULT_MODEL_PRESETS,
-  MINIMAX_API_MODEL_CATALOG,
+  KILO_API_MODEL_CATALOG,
   isProposalEligibleAgent,
 } from './config.js';
 export {
@@ -51,13 +51,23 @@ export type {
 } from './goal-config.js';
 export {
   CUSTOM_PROVIDER_ID_PREFIX,
-  MANAGED_MINIMAX_PROVIDER_ID,
-  MINIMAX_API_PROVIDER_ID,
+  KILO_PROVIDER_ID,
+  KILO_API_PROVIDER_ID,
   isFirstPartyMinimaxMessagesRoute,
   listRouteModelIds,
   resolveModelAvailability,
   resolveModelCallRoute,
 } from './model-availability.js';
+export {
+  KILO_GATEWAY_BASE_URL,
+  KILO_GATEWAY_API_FORMAT,
+  KILO_DEFAULT_MODEL,
+  KILO_FALLBACK_MODELS,
+  KILO_FREE_MODELS,
+  KILO_MODEL_CATALOG,
+  resolveKiloApiKey,
+  buildKiloProviderEntry,
+} from './kilo-provider.js';
 export type {
   ModelAvailability,
   ModelAvailabilityConfigView,
@@ -229,6 +239,7 @@ export type {
   MavisBuildEnv,
   PresetKey,
   PromptConfig,
+  PentestConfig,
   TuiCustomStatusLineConfig,
 } from './config.js';
 export {

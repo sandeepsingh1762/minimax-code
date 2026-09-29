@@ -176,8 +176,8 @@ describe("CLI session title review", () => {
   });
 
   it.each([
-    "minimax_api/test-model",
-    "minimax/test-model",
+    "kilo_api/test-model",
+    "kilo/test-model",
     "external/test-model",
   ])("allows non-managed credentials on %s", async (effectiveModel) => {
     const { policy, review } = fixture({

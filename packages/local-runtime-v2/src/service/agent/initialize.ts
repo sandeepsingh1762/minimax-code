@@ -5,7 +5,7 @@ import {
   type LegacyCustomAgentMaterializationEvent,
 } from './application/agent.service.js';
 import type { LegacyIdentityDetachEvent } from './application/_migration-legacy-identity-detach.js';
-import type { AgentSystemFactCallbacks } from './contracts.js';
+import type { AgentPromptMode, AgentSystemFactCallbacks } from './contracts.js';
 import { LocalPromptFileReader } from '../prompt-config/index.js';
 
 export interface AgentRuntimeOwner {
@@ -17,7 +17,8 @@ export interface AgentRuntimeOwner {
 
 export function createAgentRuntimeOwner(input: {
   readonly database: AppDb;
-  readonly promptMode?: 'tui' | 'coding' | 'work';
+  /** Prompt family every built-in Agent renders from, including `pentest`. */
+  readonly promptMode?: AgentPromptMode;
   readonly promptVersion?: string;
   readonly dataDir: string;
   readonly nowMs?: () => number;

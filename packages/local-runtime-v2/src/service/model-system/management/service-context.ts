@@ -1,6 +1,6 @@
 import {
   CUSTOM_PROVIDER_ID_PREFIX,
-  MINIMAX_API_PROVIDER_ID,
+  KILO_API_PROVIDER_ID,
   formatModelKey,
   parseProviderId,
 } from '../resolution/model-key.js';
@@ -236,7 +236,7 @@ export class ModelProviderServiceContext {
   constructor(readonly deps: LocalModelProviderServiceDeps) {}
 
   minimaxMutationKey(): string {
-    return `${this.deps.configGetter().dataDir}\u0000${MINIMAX_API_PROVIDER_ID}`;
+    return `${this.deps.configGetter().dataDir}\u0000${KILO_API_PROVIDER_ID}`;
   }
 
   resolveUserProviderCandidate(
@@ -406,7 +406,7 @@ export class ModelProviderServiceContext {
   ): ResolvedConnectionTestTarget {
     const apiKey = options.apiKeyOverride?.trim() || config.minimax_api?.apiKey?.trim();
     if (!apiKey) {
-      throw new LocalModelProviderError(400, 'MiniMax API key is not configured', 'NO_API_KEY');
+      throw new LocalModelProviderError(400, 'Kilo API key is not configured', 'NO_API_KEY');
     }
     const models = minimaxApiModels(config);
     const chosenModelId = requireMinimaxModelId(models, modelId);
@@ -422,7 +422,7 @@ export class ModelProviderServiceContext {
       outputLimit,
     };
     return {
-      cacheKey: providerTestCacheKey(MINIMAX_API_PROVIDER_ID, modelId),
+      cacheKey: providerTestCacheKey(KILO_API_PROVIDER_ID, modelId),
       fingerprint: modelConnectionTestFingerprint(target, model),
       target,
       ...(minimaxM3ThinkingModes ? { minimaxM3ThinkingModes } : {}),

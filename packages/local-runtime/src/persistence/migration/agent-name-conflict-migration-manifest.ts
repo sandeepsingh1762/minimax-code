@@ -1,10 +1,21 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+import {
+  CANONICAL_SUBAGENT_ROLES,
+  type CanonicalSubagentRole,
+} from '@mavis/agent-tools/desktop/subagent-roles';
+
 import { writeJsonAtomic } from './agent-name-conflict-migration-files.js';
 
 export const AGENT_NAME_CONFLICT_MANIFEST_SCHEMA_VERSION = 1;
-export const CANONICAL_AGENT_NAMES = ['explore', 'worker', 'verifier'] as const;
+/**
+ * Derived from the canonical role table so a Custom Agent that collides with
+ * any built-in role — including the offensive `recon`/`webapp`/`infra`/`mobile`
+ * roles — is migrated instead of silently keeping a reserved name. Adding a
+ * role in `subagent-roles.ts` therefore cannot leave a hole here.
+ */
+export const CANONICAL_AGENT_NAMES: readonly CanonicalSubagentRole[] = CANONICAL_SUBAGENT_ROLES;
 
 export type AgentNameMapping = {
   from: string;
@@ -178,7 +189,7 @@ function validateMappings(mappings: readonly AgentNameMapping[]): void {
     if (
       !mapping ||
       typeof mapping !== 'object' ||
-      !CANONICAL_AGENT_NAMES.includes(mapping.from as (typeof CANONICAL_AGENT_NAMES)[number]) ||
+      !CANONICAL_AGENT_NAMES.includes(mapping.from as CanonicalSubagentRole) ||
       (mapping.to !== targetPrefix &&
         !new RegExp(`^${targetPrefix}-[0-9]+$`, 'u').test(mapping.to)) ||
       !['prepared', 'renamed'].includes(mapping.stage) ||

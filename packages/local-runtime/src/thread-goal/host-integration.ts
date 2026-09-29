@@ -24,12 +24,20 @@ import {
   type ThreadGoalChangedEvent,
   type ThreadGoalRuntimeEvent,
 } from './events.js';
-import { isThreadGoalEnabled, type ThreadGoalGateConfig } from './gate.js';
+import {
+  isThreadGoalEnabled,
+  resolveThreadGoalBudgetLimits,
+  threadGoalBudgetGraceSteps,
+  threadGoalRepeatedNotMetLimit,
+  threadGoalRepeatedReplyLimit,
+  type ThreadGoalGateConfig,
+} from './gate.js';
 import type { InternalGoalPromptTurn, LocalThreadGoalIntegrationDeps } from './host-deps.js';
 import type { ThreadGoalQueueItemIdentity } from './kickoff.js';
 import type { ThreadGoalContinuationOrchestrator } from './orchestrator.js';
 import type { ThreadGoalSettlementDecision, ThreadGoalSettlementInput } from './settlement.js';
 import { SqliteThreadGoalStore } from './store.js';
+import { buildGoalStopPayload, GoalStopDiagnoses } from './stop-diagnosis.js';
 import type { BoundTurnAccounting } from './turn-context.js';
 import type { GoalPromptKind, PreparedGoalPrompt } from './prompt.js';
 import { selectGoalReminderPromptKind } from './reminder-policy.js';
@@ -46,6 +54,7 @@ export type { ThreadGoalSettlementDecision } from './settlement.js';
 export class LocalThreadGoalIntegration {
   readonly store: HostGoalStore;
   private readonly modules: GoalHostModules;
+  private readonly stopDiagnoses = new GoalStopDiagnoses();
   private configGetter?: () => ThreadGoalGateConfig;
 
   constructor(private readonly deps: LocalThreadGoalIntegrationDeps) {
@@ -57,6 +66,7 @@ export class LocalThreadGoalIntegration {
       isEnabled: () => this.isEnabled(),
       emitRuntimeEvent: (event) => this.emitRuntimeEvent(event),
       emitStateTransition: (from, goal) => this.emitStateTransition(from, goal),
+      stopDiagnoses: this.stopDiagnoses,
       handleChanged: (event) => this.handleChanged(event),
       handleTurnTimingFinished: (timing) => this.handleTurnTimingFinished(timing),
     });
@@ -230,6 +240,16 @@ export class LocalThreadGoalIntegration {
     this.modules.continuation.recordPromptSubmitted(goal, kind);
   }
 
+  /**
+   * The single point every lifecycle transition passes through, and therefore
+   * the only place a stop can be announced exactly once.
+   *
+   * `goal.stopped` fires for any transition out of `active`, so a genuine
+   * completion, a budget the user actually set running out, a breaker pause, a
+   * model-declared impasse, and a provider refusal are all distinguishable in
+   * one record. The effective ladder is read here rather than persisted, because
+   * a config reload changes what would have fired without changing the row.
+   */
   private emitStateTransition(from: ThreadGoalState['status'], goal: ThreadGoalState): void {
     if (goal.status === from || goal.statusReason === null) return;
     this.emitRuntimeEvent({
@@ -242,6 +262,29 @@ export class LocalThreadGoalIntegration {
         to: goal.status,
         reason: goal.statusReason,
       },
+    });
+    if (from !== 'active') return;
+    const configGetter = () => (this.configGetter ?? this.deps.configGetter)?.() ?? {};
+    // `resolveThreadGoalBudgetLimits` is the same resolution admission uses, so
+    // the caps reported here are exactly the ones that were in force.
+    const budgets = resolveThreadGoalBudgetLimits(goal, configGetter);
+    this.emitRuntimeEvent({
+      type: 'goal.stopped',
+      at: this.deps.nowMs(),
+      payload: buildGoalStopPayload({
+        goal,
+        from,
+        reason: goal.statusReason,
+        breaker: this.stopDiagnoses.take(goal.goalId),
+        limits: {
+          repeatedReplyLimit: threadGoalRepeatedReplyLimit(configGetter),
+          repeatedNotMetLimit: threadGoalRepeatedNotMetLimit(configGetter),
+          graceSteps: threadGoalBudgetGraceSteps(configGetter),
+          tokenBudget: budgets.tokens,
+          mainTurns: budgets.mainTurns,
+          activeSeconds: budgets.activeSeconds,
+        },
+      }),
     });
   }
 

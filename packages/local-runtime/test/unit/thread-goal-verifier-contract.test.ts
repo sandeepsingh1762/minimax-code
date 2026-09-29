@@ -522,16 +522,16 @@ describe("Thread Goal verifier host contract", () => {
 
   it.each([
     [
-      "managed token plan",
-      "minimax/MiniMax-M3",
+      "Kilo gateway",
+      "kilo/kilo-auto/free",
       {
         provider: {
-          minimax: { options: { authMode: "managed-login" as const } },
+          kilo: { options: { authMode: "managed-login" as const } },
         },
       },
       "subagent",
     ],
-    ["MiniMax API key", "minimax_api/MiniMax-M3", {}, "subagent"],
+    ["Kilo API key", "kilo_api/kilo-auto/free", {}, "subagent"],
     ["custom provider", "custom_provider:work/worker-model", {}, "none"],
     ["configured provider", "openai/worker-model", {}, "none"],
   ] as const)(

@@ -143,6 +143,10 @@ writeFileSync(
   JSON.stringify(
     {
       name: "@minimax-ai/code", version, type: "module", private: true,
+      bin: {
+        mcode: "cli.js",
+        "minimax-code": "cli.js"
+      },
       ...(process.env.MCODE_RELEASE_TAG ? {
         gitHead: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(),
       } : {}),

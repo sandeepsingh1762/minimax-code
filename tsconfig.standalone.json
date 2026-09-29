@@ -259,6 +259,9 @@
       "@mavis/shared/file-source-citation": [
         "./packages/shared/src/file-source-citation.ts"
       ],
+      "@mavis/shared/findings-limits": [
+        "./packages/shared/src/findings-limits.ts"
+      ],
       "@mavis/shared/global-events": [
         "./packages/shared/src/global-events.ts"
       ],

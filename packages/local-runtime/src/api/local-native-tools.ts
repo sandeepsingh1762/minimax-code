@@ -16,6 +16,8 @@ import {
   type LocalTaskAdapter,
   type LocalTaskAppendAdapter,
   type LocalTaskControlAdapter,
+  type LocalPentestProbeAdapter,
+  type LocalPentestFindingsAdapter,
   type LocalWebFetchAdapter,
   type LocalWebSearchAdapter,
   WebSearchToolDef,
@@ -32,6 +34,9 @@ import type { ModuleMetricsReporter } from "../common/metrics.js";
 import { CU_DESKTOP_SKILL_NAME } from "../cu/gate.js";
 import type { LocalMemoryFacade } from "../memory/local-memory-facade.js";
 import { executeLocalMemoryTool } from "../memory/local-memory-tool.js";
+import type { LocalFindingFacade } from "../pentest/local-finding-facade.js";
+import { executeLocalPentestFindingsTool } from "../pentest/local-pentest-findings-tool.js";
+import { LocalPentestProbeClient } from "../pentest/local-pentest-probe-client.js";
 import type { DesktopTurnCapabilityView } from "../runtime/desktop-turn-capabilities.js";
 import type { LocalRuntimeAuthContext } from "../runtime/model-resolver.js";
 import type { LocalRuntimeRoutingContext } from "../runtime/routing-headers.js";
@@ -55,6 +60,34 @@ import type {
   LocalTurnToolSources,
   LocalTurnToolSourcesInput,
 } from "./local-turn-tool-sources.types.js";
+
+/**
+ * Pentest capability switches for one Turn's tool sources.
+ *
+ * Declared here, as an intersection with `LocalTurnToolSourcesInput`, rather than
+ * inside that shared type: both pentest tools are opt-in capabilities whose
+ * activation belongs to the surface that owns the Turn, not to every v1 tool
+ * source in the runtime. Absent fields mean "no pentest tools".
+ */
+export interface LocalTurnPentestToolSourcesInput {
+  /** Overrides the default probe client; used by tests to inject a fake. */
+  pentestProbeAdapter?: LocalPentestProbeAdapter;
+  /** Overrides the default ledger adapter built from `findingFacade`. */
+  pentestFindingsAdapter?: LocalPentestFindingsAdapter;
+  /**
+   * Must be explicitly true for `pentest_probe` to be assembled. Active network
+   * probing is never on by default, even when a `fetchImpl` is available.
+   */
+  pentestProbeEnabled?: boolean;
+  /** Supplies the durable ledger; `pentest_findings` is absent without it. */
+  findingFacade?: LocalFindingFacade;
+  /**
+   * Authorized targets from `pentest.scope`. An empty or absent list means the
+   * permission system is the only boundary; a non-empty list is enforced in
+   * the probe client before any socket is opened.
+   */
+  pentestScope?: readonly string[];
+}
 
 export type {
   LocalTurnToolSources,
@@ -83,6 +116,22 @@ export function buildLocalNativeRuntimeTools(input: {
   taskAppendAdapter?: LocalTaskAppendAdapter;
   taskControlAdapter?: LocalTaskControlAdapter;
   memoryFacade?: LocalMemoryFacade;
+  /**
+   * Host-owned pentest capabilities. Both are opt-in: a surface that supplies
+   * neither adapter gets neither tool, so network reach and a writable ledger
+   * are never acquired implicitly. `pentestProbeEnabled` is a separate switch
+   * because active probing is the part that must be deliberately turned on.
+   */
+  pentestProbeAdapter?: LocalPentestProbeAdapter;
+  pentestFindingsAdapter?: LocalPentestFindingsAdapter;
+  pentestProbeEnabled?: boolean;
+  findingFacade?: LocalFindingFacade;
+  /**
+   * Authorized targets from `pentest.scope`. Empty or absent means the
+   * permission system is the only boundary; a non-empty list is enforced
+   * inside the probe client before any socket is opened.
+   */
+  pentestScope?: readonly string[];
   mavisAgentAdapter?: LocalMavisAgentAdapter;
   mavisCronAdapter?: LocalMavisCronAdapter;
   mavisMcpAdapter?: LocalMavisMcpAdapter;
@@ -119,6 +168,27 @@ export function buildLocalNativeRuntimeTools(input: {
     input.webSearchEnabled === true
       ? (input.webSearchAdapter ?? createManagedLocalWebSearchClient(input))
       : undefined;
+  // Both pentest adapters are host-owned. `pentest_probe` is additionally gated
+  // on its own enable switch: a host must opt in to active network probing
+  // explicitly, and the permission engine asks on the first call regardless.
+  const pentestProbeAdapter =
+    input.pentestProbeEnabled === true
+      ? (input.pentestProbeAdapter ??
+        new LocalPentestProbeClient({
+          ...(input.fetchImpl ? { fetchImpl: input.fetchImpl } : {}),
+          // The operator's authorized target list, enforced inside the client
+          // before any packet is sent.
+          ...(input.pentestScope && input.pentestScope.length > 0
+            ? { scope: input.pentestScope }
+            : {}),
+        }))
+      : undefined;
+  const pentestFindingsAdapter = input.findingFacade
+    ? (input.pentestFindingsAdapter ?? {
+        execute: (ctx, toolInput) =>
+          executeLocalPentestFindingsTool(input.findingFacade!, ctx, toolInput),
+      })
+    : undefined;
   const builtinSkillNames = resolveFeatureAwareBuiltinSkillNames(capabilities, {
     cuModeActive: input.cuModeActive === true,
     ...(input.miniappAvailable === true ? { miniappAvailable: true } : {}),
@@ -224,6 +294,8 @@ export function buildLocalNativeRuntimeTools(input: {
                 ),
             }
           : undefined,
+      pentestProbeAdapter,
+      pentestFindingsAdapter,
       mavisAgentAdapter: input.mavisAgentAdapter,
       mavisCronAdapter: input.mavisCronAdapter,
       mavisMcpAdapter: input.mavisMcpAdapter,
@@ -256,7 +328,7 @@ export function buildLocalNativeRuntimeTools(input: {
  * AgentRuntime applies model gates, MCP disclosure and final catalog ordering.
  */
 export async function buildLocalTurnToolSources(
-  input: LocalTurnToolSourcesInput,
+  input: LocalTurnToolSourcesInput & LocalTurnPentestToolSourcesInput,
 ): Promise<LocalTurnToolSources> {
   if (input.toolsDisabled) {
     return {
@@ -300,6 +372,12 @@ export async function buildLocalTurnToolSources(
       ? input.taskControlAdapter
       : undefined,
     memoryFacade: input.memoryFacade,
+    findingFacade: input.findingFacade,
+    pentestProbeAdapter: input.pentestProbeAdapter,
+    pentestFindingsAdapter: input.pentestFindingsAdapter,
+    ...(input.pentestProbeEnabled === undefined
+      ? {}
+      : { pentestProbeEnabled: input.pentestProbeEnabled }),
     mavisAgentAdapter: input.mavisAgentAdapter,
     mavisCronAdapter: input.mavisCronAdapter,
     mavisMcpAdapter: input.mcpService.createMavisAdapter(input.emitBusEvent),

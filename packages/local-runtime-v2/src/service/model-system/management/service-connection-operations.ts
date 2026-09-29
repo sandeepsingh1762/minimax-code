@@ -1,5 +1,5 @@
-import { MINIMAX_API_PROVIDER_ID, parseProviderId } from '../resolution/model-key.js';
-import { MANAGED_MINIMAX_PROVIDER_ID } from '../identity.js';
+import { KILO_API_PROVIDER_ID, parseProviderId } from '../resolution/model-key.js';
+import { KILO_PROVIDER_ID } from '../identity.js';
 import type { DiscoveredModel } from '../connectivity/discover-models.js';
 import { customProviderKind } from '../catalog/list-models.js';
 import { ModelProviderServiceContext } from './service-context.js';
@@ -85,10 +85,10 @@ export function assertModelSelectable(
 ): void {
   const config = context.deps.configGetter();
   if (
-    providerId === MANAGED_MINIMAX_PROVIDER_ID &&
+    providerId === KILO_PROVIDER_ID &&
     config.minimaxModelSource === 'minimax_api_key'
   ) {
-    context.resolveTestTarget(MINIMAX_API_PROVIDER_ID, modelId);
+    context.resolveTestTarget(KILO_API_PROVIDER_ID, modelId);
     return;
   }
   const parsed = parseProviderId(providerId);

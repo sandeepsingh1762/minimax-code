@@ -20,6 +20,7 @@ import { createHostedAgentContextUsageCapabilities } from '../context/hosted-age
 import type { LocalHookService } from '../hooks/api.js';
 import type { LocalDataCollector } from '../memory/local-data-collector.js';
 import type { LocalMemoryFacade } from '../memory/local-memory-facade.js';
+import type { LocalFindingFacade } from '../pentest/local-finding-facade.js';
 import { recordMemorySessionTerminal } from '../memory/local-memory-orchestration.js';
 import type { LocalRuntimeAuthContext } from '../runtime/model-resolver.js';
 import type { DesktopTurnCapabilityView } from '../runtime/desktop-turn-capabilities.js';
@@ -80,6 +81,8 @@ export interface HostedAgentCapabilitiesHost {
   readonly routingContextGetter?: () => LocalRuntimeRoutingContext | undefined;
   readonly skillService: LocalSkillService;
   readonly memoryFacade: LocalMemoryFacade;
+  /** Durable vulnerability ledger. Constructed by the host; never null. */
+  readonly findingFacade: LocalFindingFacade;
   readonly mcpService: { isBuiltinMatrixAvailable(): boolean };
   readonly localDataCollector: Pick<LocalDataCollector, 'toSessionInfo' | 'toMessage'>;
   readonly systemReminderService: Pick<LocalSystemReminderService, 'buildReminder'>;
@@ -125,6 +128,10 @@ export interface HostedAgentCapabilityRestrictions {
   readonly disableCron?: boolean;
   readonly disableComputerUse?: boolean;
   readonly disableMavis?: boolean;
+  /** Withholds the whole engagement surface, ledger and probe alike. */
+  readonly disablePentest?: boolean;
+  /** Withholds only `pentest_probe`, keeping the offline findings ledger. */
+  readonly disablePentestProbe?: boolean;
   readonly disabledBuiltinSkillNames?: readonly AgentBuiltinSkillId[];
   readonly resumeCodexAvailable?: boolean;
 }
@@ -200,6 +207,19 @@ export function createHostedAgentCapabilities(
           memoryGloballyEnabled && input.session.memoryPolicy?.recallEnabled !== false;
         const memoryWriteEnabled =
           memoryGloballyEnabled && input.session.memoryPolicy?.writeEnabled !== false;
+        // The engagement surface is opt-in through config and independently
+        // gated by the host's restrictions, so a surface that never asked for
+        // offensive capability never acquires network reach. The probe is
+        // subordinate: no ledger means no engagement, and the probe additionally
+        // requires its own switch, because refusing to send a packet is a
+        // strictly weaker promise than refusing to record a result.
+        const pentestConfig = host.configGetter().pentest;
+        const pentestGloballyEnabled = !restrictions.disablePentest && pentestConfig?.enabled !== false;
+        const pentestProbeEnabled =
+          pentestGloballyEnabled &&
+          !restrictions.disablePentestProbe &&
+          pentestConfig?.probeEnabled !== false;
+        const pentestScope = pentestConfig?.scope ?? [];
         return host.buildOwnerTurnToolSources({
           session: toLocalSessionRecord(input.session),
           resourceAgentName: input.resourceAgentName,
@@ -231,6 +251,11 @@ export function createHostedAgentCapabilities(
             : {}),
           ...(restrictions.resumeCodexAvailable === true ? { resumeCodexAvailable: true } : {}),
           cuModeActive: !restrictions.disableComputerUse && input.cuModeActive,
+          ...(pentestGloballyEnabled ? { findingFacade: host.findingFacade } : {}),
+          ...(pentestProbeEnabled ? { pentestProbeEnabled: true } : {}),
+          ...(pentestProbeEnabled && pentestScope.length > 0
+            ? { pentestScope: pentestScope }
+            : {}),
           ...(input.miniappAvailable === true ? { miniappAvailable: true } : {}),
           ...(input.desktopCapabilities ? { desktopCapabilities: input.desktopCapabilities } : {}),
         });

@@ -145,8 +145,8 @@ export async function resolveTurnModelSelection(
 /**
  * V1 lets its source-specific resolver own unavailable BYOK Session refs. Keep
  * that behavior so a config/model switch observed between writes cannot
- * permanently rewrite the Session to the managed default. Explicit requests
- * and managed Session refs remain protected by the route gate above.
+ * permanently rewrite the Session to the builtin default. Explicit requests
+ * and builtin Session refs remain protected by the route gate above.
  */
 function shouldDeferUnavailableByokSession(
   selection: TurnModelSelection,
@@ -154,7 +154,7 @@ function shouldDeferUnavailableByokSession(
 ): boolean {
   return (
     selection.source === 'session_override' &&
-    (route === 'minimax_api_key' || route === 'custom_provider')
+    (route === 'kilo_api_key' || route === 'custom_provider')
   );
 }
 

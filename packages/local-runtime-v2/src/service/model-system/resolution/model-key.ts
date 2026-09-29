@@ -1,10 +1,10 @@
 import {
   CUSTOM_PROVIDER_ID_PREFIX,
-  MINIMAX_API_PROVIDER_ID,
+  KILO_API_PROVIDER_ID,
   type ModelProviderSource,
 } from '../identity.js';
 
-export { CUSTOM_PROVIDER_ID_PREFIX, MINIMAX_API_PROVIDER_ID } from '../identity.js';
+export { CUSTOM_PROVIDER_ID_PREFIX, KILO_API_PROVIDER_ID } from '../identity.js';
 
 export interface ParsedProviderId {
   readonly source: ModelProviderSource;
@@ -20,8 +20,8 @@ export function parseProviderId(
   providerId: string | undefined | null,
 ): ParsedProviderId | undefined {
   if (!providerId) return undefined;
-  if (providerId === MINIMAX_API_PROVIDER_ID) {
-    return { source: 'minimax_api', providerId, providerKey: MINIMAX_API_PROVIDER_ID };
+  if (providerId === KILO_API_PROVIDER_ID) {
+    return { source: 'minimax_api', providerId, providerKey: KILO_API_PROVIDER_ID };
   }
   if (providerId.startsWith(CUSTOM_PROVIDER_ID_PREFIX)) {
     const providerKey = providerId.slice(CUSTOM_PROVIDER_ID_PREFIX.length);

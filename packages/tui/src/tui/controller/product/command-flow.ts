@@ -1328,6 +1328,14 @@ export class TuiCommandFlow {
       },
       model: async ({ args }) => this.options.featureFlow.showModelPicker(args),
       provider: async () => this.options.featureFlow.showProviderManager(),
+      connect: async ({ args }) => {
+        const key = args.trim();
+        if (key) {
+          await this.options.featureFlow.setMiniMaxApiKey(key);
+        } else {
+          await this.options.featureFlow.showProviderManager({ startWithKey: true });
+        }
+      },
       plugins: async ({ args }) => this.options.featureFlow.showPlugins(args),
       skills: async ({ args }) => this.options.featureFlow.showSkills(args),
       mcp: async ({ args }) => this.options.featureFlow.showMcpServers(args),

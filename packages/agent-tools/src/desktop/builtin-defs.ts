@@ -328,6 +328,309 @@ export const LocalMemoryToolDef = {
 } as const satisfies ToolDefinition;
 export type LocalMemoryToolInput = Static<typeof LocalMemoryToolDef.schema>;
 
+const PENTEST_PROBE_TIMEOUT_MS_DESCRIPTION =
+  `Client-side timeout in milliseconds. Omitted uses 10000; values above 60000 are clamped to 60000 so a probe can never pin the turn open.`;
+
+const LocalPentestProbeHttpSchema = Type.Object(
+  {
+    url: Type.String({
+      description:
+        'Absolute http:// or https:// URL to request. Required when transport=http.',
+    }),
+    method: Type.Optional(
+      Type.String({
+        description:
+          'HTTP method. Defaults to GET. Any method is sent verbatim (POST, PUT, PATCH, DELETE, OPTIONS, PROPFIND, custom tokens) because the probe does not know which one a given endpoint needs.',
+      }),
+    ),
+    headers: Type.Optional(
+      Type.Record(Type.String(), Type.String(), {
+        description:
+          'Exact request headers to send. Replaces the default header set entirely, so include Host-adjacent headers such as Authorization or Cookie yourself.',
+      }),
+    ),
+    body: Type.Optional(
+      Type.String({
+        description: 'Request body sent verbatim. Supply your own Content-Type header when the body is not form-encoded.',
+      }),
+    ),
+    timeoutMs: Type.Optional(
+      Type.Integer({ minimum: 1, maximum: 60_000, description: PENTEST_PROBE_TIMEOUT_MS_DESCRIPTION }),
+    ),
+    followRedirects: Type.Optional(
+      Type.Boolean({
+        description:
+          'Defaults to false. A 3xx is returned as evidence with its Location header instead of being followed, so redirect chains stay visible in the ledger.',
+      }),
+    ),
+  },
+  { additionalProperties: false },
+);
+
+const LocalPentestProbeTcpSchema = Type.Object(
+  {
+    host: Type.String({ description: 'Hostname or IP to connect to. Required when transport=tcp.' }),
+    port: Type.Integer({ minimum: 1, maximum: 65_535, description: 'TCP port to connect to.' }),
+    timeoutMs: Type.Optional(
+      Type.Integer({ minimum: 1, maximum: 60_000, description: PENTEST_PROBE_TIMEOUT_MS_DESCRIPTION }),
+    ),
+    sendHex: Type.Optional(
+      Type.String({
+        description:
+          'Hex-encoded bytes written once after the connection opens, used to collect a protocol banner or drive a line-oriented exchange. Omit for a pure port/banner probe.',
+      }),
+    ),
+  },
+  { additionalProperties: false },
+);
+
+const LocalPentestProbeDnsSchema = Type.Object(
+  {
+    host: Type.String({ description: 'Name to resolve. Required when transport=dns.' }),
+    recordType: Type.Optional(
+      Type.String({
+        description:
+          'Record type: A, AAAA, ANY, CAA, CNAME, MX, NS, PTR, SOA, SRV or TXT. Defaults to A. An unsupported type is reported as an error rather than silently downgraded.',
+      }),
+    ),
+    resolver: Type.Optional(
+      Type.String({
+        description:
+          'Optional DNS server address (for example 8.8.8.8) to query instead of the system resolver, so you can compare answers across resolvers.',
+      }),
+    ),
+  },
+  { additionalProperties: false },
+);
+
+const LocalPentestProbeTlsSchema = Type.Object(
+  {
+    host: Type.String({
+      description: 'Hostname or IP whose certificate to inspect. Required when transport=tls.',
+    }),
+    port: Type.Optional(
+      Type.Integer({ minimum: 1, maximum: 65_535, description: 'TLS port. Defaults to 443.' }),
+    ),
+    timeoutMs: Type.Optional(
+      Type.Integer({ minimum: 1, maximum: 60_000, description: PENTEST_PROBE_TIMEOUT_MS_DESCRIPTION }),
+    ),
+  },
+  { additionalProperties: false },
+);
+
+export const LocalPentestProbeToolDef = {
+  name: 'pentest_probe',
+  // Reaches the network and a user-supplied target, so it never joins the
+  // parallel lane with read-only tools such as web_fetch.
+  executionMode: 'sequential',
+  description:
+    '⚠️ **Active probe — permission-gated.** Sends one request or opens one connection to a target the user has authorized you to test, directly from this machine. The first call in a session asks the user to approve it, and the local permission engine classifies it as a `network` action, so a user can also allow or deny it with a permission rule. Only probe systems you are explicitly authorized to assess.\n\n' +
+    'One generic ACTIVE probe primitive. It hardcodes **no** scan method, payload, wordlist, or vulnerability class: you decide exactly what to send, and the tool returns normalized, durable evidence for what came back. Never claim a vulnerability from an assumed outcome — probe it, then record the observed response with `pentest_findings`.\n\n' +
+    '**Transports**\n' +
+    '- `http` (default) — raw HTTP. Arbitrary `method`, `headers` and `body`; returns status, a header subset, the body excerpt, and elapsed ms. Redirects are NOT followed unless you pass `followRedirects: true`, so a 3xx stays visible as evidence.\n' +
+    '- `tcp` — TCP connect plus optional hex payload write. Use it for port state, banner collection and line-oriented protocol handshakes.\n' +
+    '- `dns` — record lookup with an optional alternate resolver.\n' +
+    '- `tls` — certificate inspection: subject, issuer, SANs, validity window, negotiated protocol and cipher, plus whether the chain verified.\n\n' +
+    '**Rules**\n' +
+    '- Pass exactly the sub-object matching `transport`; supplying a mismatched one is rejected before any traffic leaves the machine.\n' +
+    '- Omit `timeoutMs` for the 10s default. Values above 60s are clamped, so you cannot hang the turn.\n' +
+    '- Attach `notes` to label the probe in your own notes; it is returned verbatim in the evidence.\n' +
+    '- A failed probe is returned as a readable result, never as a thrown error. Read the returned evidence — a refused connection, a 403 and a timeout are all findings in their own right and belong in the ledger.',
+  schema: Type.Object(
+    {
+      transport: Type.Optional(
+        Type.Union([Type.Literal('http'), Type.Literal('tcp'), Type.Literal('dns'), Type.Literal('tls')], {
+          description: 'Probe transport. Defaults to http.',
+        }),
+      ),
+      http: Type.Optional(LocalPentestProbeHttpSchema),
+      tcp: Type.Optional(LocalPentestProbeTcpSchema),
+      dns: Type.Optional(LocalPentestProbeDnsSchema),
+      tls: Type.Optional(LocalPentestProbeTlsSchema),
+      notes: Type.Optional(
+        Type.String({
+          description:
+            'Free-text label returned with the evidence, for example the hypothesis under test. Not sent to the target.',
+        }),
+      ),
+    },
+    { additionalProperties: false },
+  ),
+} as const satisfies ToolDefinition;
+export type LocalPentestProbeToolInput = Static<typeof LocalPentestProbeToolDef.schema>;
+
+const LocalPentestFindingKindSchema = Type.Union(
+  [
+    Type.Literal('finding'),
+    Type.Literal('host'),
+    Type.Literal('port'),
+    Type.Literal('service'),
+    Type.Literal('endpoint'),
+    Type.Literal('parameter'),
+    Type.Literal('identity'),
+    Type.Literal('technology'),
+    Type.Literal('artifact'),
+  ],
+  {
+    description:
+      'What this record describes. Defaults to finding. Use the non-finding kinds to build the attack-surface inventory that `surface` reads back — hosts, ports, services, endpoints, parameters, identities, technologies and artifacts you have mapped.',
+  },
+);
+
+const LocalPentestFindingStatusSchema = Type.Union(
+  [
+    Type.Literal('candidate'),
+    Type.Literal('confirmed'),
+    Type.Literal('exploited'),
+    Type.Literal('reported'),
+    Type.Literal('false_positive'),
+    Type.Literal('fixed'),
+    Type.Literal('risk_accepted'),
+  ],
+  {
+    description:
+      'Lifecycle state. candidate -> confirmed -> exploited -> reported is the progress path; false_positive, fixed and risk_accepted are terminal. Defaults to candidate on record.',
+  },
+);
+
+export const LocalPentestFindingsToolDef = {
+  name: 'pentest_findings',
+  // The ledger is the agent's durable memory across long autonomous runs; keep
+  // it off the parallel lane so concurrent records cannot interleave reads.
+  executionMode: 'sequential',
+  description:
+    'Durable vulnerability and attack-surface ledger for long, multi-session authorized assessments. Persists to disk per agent, so a resumed, compacted or restarted session recovers what was already found and never reports the same issue twice.\n\n' +
+    '**Record what you observe, immediately.** After each probe, call `record` with the evidence you actually saw. Deduplication is automatic: a record whose target, vulnerability class, endpoint and key evidence match an existing finding is MERGED into it (evidence appended, strongest severity kept, observation counter bumped) instead of duplicated, and the result tells you it merged.\n\n' +
+    '**Operations**\n' +
+    '- `record` — add a finding or an attack-surface record (see `kind`).\n' +
+    '- `status` — move a finding along the lifecycle. Enforced transition table; an illegal move is rejected with the legal next states so you can correct it.\n' +
+    '- `update` — amend fields of an existing finding without touching its status.\n' +
+    '- `surface` — read back the mapped attack surface. Call this first after a context compaction or at the start of a resumed session to recover hosts, ports, services, endpoints, parameters, identities, technologies and artifacts.\n' +
+    '- `list` / `search` / `get` — read findings back, filtered by status, severity or target, or by free-text query, with a bounded page.\n' +
+    '- `stats` — counts by status and by severity, for judging progress.\n' +
+    '- `export` — emit the whole ledger as JSON or Markdown for a report.\n' +
+    '- `forget` — delete a finding. Needed because false_positive, fixed and risk_accepted are terminal: to reopen a mis-triaged finding, forget it and record it again.\n\n' +
+    '**Severity** is critical, high, medium, low or info. **Status** starts at candidate; promote to confirmed only once you have positive evidence, to exploited once you have demonstrated impact, and to reported only once it has been delivered. Do not inflate severity to make a report read better — the ledger is the evidence of record.',
+  schema: Type.Object(
+    {
+      operation: Type.Union(
+        [
+          Type.Literal('record'),
+          Type.Literal('list'),
+          Type.Literal('get'),
+          Type.Literal('search'),
+          Type.Literal('update'),
+          Type.Literal('status'),
+          Type.Literal('surface'),
+          Type.Literal('export'),
+          Type.Literal('stats'),
+          Type.Literal('forget'),
+        ],
+        { description: 'Ledger operation to perform.' },
+      ),
+      finding_id: Type.Optional(
+        Type.String({
+          description:
+            'Finding id from a previous result. Required for get, update, status and forget. The stable short fingerprint also matches, so a remembered hash is enough.',
+        }),
+      ),
+      kind: Type.Optional(LocalPentestFindingKindSchema),
+      title: Type.Optional(
+        Type.String({ description: 'One-line statement of the issue, for record and update.' }),
+      ),
+      category: Type.Optional(
+        Type.String({
+          description:
+            'Vulnerability class, for example injection, authz, cors, idor, secrets, tls. Together with target and endpoint this is the strongest dedup key, so reuse the same wording for the same class.',
+        }),
+      ),
+      severity: Type.Optional(
+        Type.Union(
+          [
+            Type.Literal('critical'),
+            Type.Literal('high'),
+            Type.Literal('medium'),
+            Type.Literal('low'),
+            Type.Literal('info'),
+          ],
+          {
+            description:
+              'Severity on record and update; a filter on list and search. Defaults to info on record, and a merged record keeps the strongest severity seen.',
+          },
+        ),
+      ),
+      confidence: Type.Optional(
+        Type.Union([Type.Literal('low'), Type.Literal('medium'), Type.Literal('high')], {
+          description: 'How sure you are this is real. A merge keeps the highest confidence seen.',
+        }),
+      ),
+      target: Type.Optional(
+        Type.String({
+          description:
+            'The host, URL or asset the record belongs to. Required for record. Normalized when fingerprinted, so scheme, case and a trailing slash do not create duplicates.',
+        }),
+      ),
+      endpoint: Type.Optional(
+        Type.String({
+          description: 'Specific endpoint, route or resource within the target, for example POST /api/v1/transfer.',
+        }),
+      ),
+      evidence: Type.Optional(
+        Type.Union([Type.String(), Type.Record(Type.String(), Type.Unknown())], {
+          description:
+            'What you actually observed: the response excerpt, status line, cert field, banner or answer record. Free text or a structured object.',
+        }),
+      ),
+      proof: Type.Optional(
+        Type.String({
+          description: 'Exact reproduction steps, so a reader can re-derive the result without you.',
+        }),
+      ),
+      remediation: Type.Optional(Type.String({ description: 'How to fix it.' })),
+      cwe: Type.Optional(Type.String({ description: 'CWE identifier, for example CWE-89.' })),
+      new_status: Type.Optional(LocalPentestFindingStatusSchema),
+      status: Type.Optional(
+        Type.Union(
+          [
+            Type.Literal('candidate'),
+            Type.Literal('confirmed'),
+            Type.Literal('exploited'),
+            Type.Literal('reported'),
+            Type.Literal('false_positive'),
+            Type.Literal('fixed'),
+            Type.Literal('risk_accepted'),
+          ],
+          { description: 'Status filter for list and search.' },
+        ),
+      ),
+      query: Type.Optional(
+        Type.String({
+          description: 'Free-text search over title, target, endpoint, category, evidence, proof and remediation.',
+        }),
+      ),
+      limit: Type.Optional(
+        Type.Integer({ minimum: 1, maximum: 100, description: 'Page size for list and search. Defaults to 20.' }),
+      ),
+      offset: Type.Optional(
+        Type.Integer({ minimum: 0, description: 'Page offset for list and search.' }),
+      ),
+      format: Type.Optional(
+        Type.Union([Type.Literal('json'), Type.Literal('markdown')], {
+          description: 'export format. Defaults to markdown.',
+        }),
+      ),
+      include_archived: Type.Optional(
+        Type.Boolean({
+          description:
+            'Include records archived by the size budget. Only export and stats read the archive.',
+        }),
+      ),
+    },
+    { additionalProperties: false },
+  ),
+} as const satisfies ToolDefinition;
+export type LocalPentestFindingsToolInput = Static<typeof LocalPentestFindingsToolDef.schema>;
+
 const LocalAskUserImageSchema = Type.Object({
   src: Type.String({
     description: 'HTTPS URL or local /mavis/api/... path for an image shown in the question UI.',

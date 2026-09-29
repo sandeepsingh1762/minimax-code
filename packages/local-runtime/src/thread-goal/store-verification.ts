@@ -5,7 +5,7 @@ import {
   type ThreadGoalDecisionResult,
   type ThreadGoalRecordVerificationInput,
 } from '@mavis/goal';
-import { GOAL_CONFIG_DEFAULTS } from '@mavis/config';
+import { GOAL_CONFIG_DEFAULTS, GOAL_CONFIG_LIMITS } from '@mavis/config';
 
 import { runInImmediateTransaction, type DatabaseLike } from '../persistence/db.js';
 import { threadGoalStaleDecision } from './binding-stale.js';
@@ -25,9 +25,14 @@ export function recordThreadGoalVerification(
     if (stale) return stale;
 
     const lastVerification = normalizeVerificationResult(state.lastVerification, input.result);
-    const repeatedNotMetLimit = positiveIntegerOrDefault(
-      input.repeatedNotMetLimit,
-      GOAL_CONFIG_DEFAULTS.verifier.repeatedNotMetLimit,
+    // Clamped for the same reason as the reply breaker: this streak is the only
+    // stop a non-converging Goal has, so it may be raised but never removed.
+    const repeatedNotMetLimit = Math.min(
+      positiveIntegerOrDefault(
+        input.repeatedNotMetLimit,
+        GOAL_CONFIG_DEFAULTS.verifier.repeatedNotMetLimit,
+      ),
+      GOAL_CONFIG_LIMITS.verifier.repeatedNotMetLimit,
     );
     const repeatedGap =
       lastVerification.verdict === 'not_met' &&

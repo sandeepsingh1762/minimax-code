@@ -76,6 +76,7 @@ import { LegacyHistoryReader } from "../legacy-opencode/legacy-history-reader.js
 import { LegacyOpencodeStore } from "../legacy-opencode/legacy-opencode-store.js";
 import type { LocalDataCollector } from "../memory/local-data-collector.js";
 import type { LocalMemoryFacade } from "../memory/local-memory-facade.js";
+import { LocalFindingFacade } from "../pentest/local-finding-facade.js";
 import { handleMemoryBusEvent } from "../memory/local-memory-orchestration.js";
 import type {
   LocalMessageChannelContext,
@@ -381,6 +382,8 @@ export class LocalRuntimeApiHost {
   /** Neutral reference port supplied by the owning runtime (V2 in production). */
   public readonly agentResolver: AgentReferenceResolver;
   public readonly memoryFacade: LocalMemoryFacade;
+  /** Durable vulnerability/state ledger backing `pentest_findings`. */
+  public readonly findingFacade: LocalFindingFacade;
   public readonly skillService: LocalSkillService;
   public readonly localDataCollector: LocalDataCollector;
   public readonly systemReminderService: LocalSystemReminderService;
@@ -642,6 +645,16 @@ export class LocalRuntimeApiHost {
       userConfiguredName: () => this.authContextGetter?.()?.subUserName,
     });
     this.memoryFacade = memory.memoryFacade;
+    // The engagement ledger is host-owned, like the memory facade, so the
+    // record survives across sessions, restarts and compactions. It is built
+    // unconditionally: whether a turn actually receives the tool is a
+    // capability decision made per turn, and an operator who disables the
+    // surface must still be able to read back what was already recorded.
+    this.findingFacade = new LocalFindingFacade({
+      dataDir: this.configGetter().dataDir,
+      nowMs: this.nowMs,
+      emitBusEvent: (type, payload) => this.emitBusEvent(type, payload),
+    });
     this.localDataCollector = memory.localDataCollector;
     this.systemReminderService = memory.systemReminderService;
     this.defaultWorkspaceDir = options.defaultWorkspaceDir;

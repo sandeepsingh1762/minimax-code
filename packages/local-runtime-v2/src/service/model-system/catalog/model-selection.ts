@@ -12,6 +12,7 @@ import {
   resolveModelAvailability,
 } from '@mavis/config';
 import { LocalModelProviderError, type LocalRuntimeConfig } from '../contracts.js';
+import { KILO_PROVIDER_ID } from '../identity.js';
 import { parseProviderId, parseSourceQualifiedModelKey } from '../resolution/model-key.js';
 
 export const LEGACY_MINIMAX_PROVIDER_ID = 'custom_provider:minimax-legacy';
@@ -32,10 +33,11 @@ export function resolveLegacyMinimaxModel(
   const configured = parseSourceQualifiedModelKey(config.defaultModel);
   const officialDefault = parseSourceQualifiedModelKey(DEFAULT_MODEL_PRESETS[preset].defaultModel);
   const candidates = [
-    { providerId: 'minimax', modelId: selection.modelId },
+    { providerId: KILO_PROVIDER_ID, modelId: selection.modelId },
     ...(configured &&
-    (configured.providerId === 'minimax' || isLegacyMinimaxProvider(config, configured.providerId))
-      ? [{ providerId: 'minimax', modelId: configured.modelId }]
+    (configured.providerId === KILO_PROVIDER_ID ||
+      isLegacyMinimaxProvider(config, configured.providerId))
+      ? [{ providerId: KILO_PROVIDER_ID, modelId: configured.modelId }]
       : []),
     ...(officialDefault
       ? [{ providerId: officialDefault.providerId, modelId: officialDefault.modelId }]
@@ -234,7 +236,7 @@ function resolveCreateThinking(
 ): ConversationModelSelection['thinking'] {
   const fallback = parseSourceQualifiedModelKey(config.defaultModel);
   const inheritsGlobalEffort =
-    providerId === 'minimax' &&
+    providerId === KILO_PROVIDER_ID &&
     config.minimaxModelSource !== 'minimax_api_key' &&
     providerId === fallback?.providerId &&
     modelId === fallback?.modelId &&
@@ -299,7 +301,9 @@ export function freezeManagedQueueModel(
   const selection = requested ?? inherited;
   const provider = selection.provider_id ?? inherited.provider_id;
   const modelId = selection.model_id ?? inherited.model_id ?? '';
-  if (provider !== 'minimax' || config.minimaxModelSource === 'minimax_api_key') return requested;
+  if (provider !== KILO_PROVIDER_ID || config.minimaxModelSource === 'minimax_api_key') {
+    return requested;
+  }
   const model = availableManagedQueueModel(config, modelId);
   if (!requested && saved && !saved.parameterSnapshot) {
     return freezeLegacyQueueSelection(provider, modelId, model, selection);
@@ -321,7 +325,7 @@ function queueSessionModel(session: SessionSelection, frozenModel?: FrozenQueueS
 }
 
 function availableManagedQueueModel(config: LocalRuntimeConfig, modelId: string) {
-  const model = config.provider?.minimax?.models?.[modelId];
+  const model = config.provider?.[KILO_PROVIDER_ID]?.models?.[modelId];
   if (!modelId || !model || model.enabled === false) {
     throw new LocalModelProviderError(
       400,

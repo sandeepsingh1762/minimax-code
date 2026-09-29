@@ -12,18 +12,18 @@
 // Do not use a resolver's generic limit fallback as a validity signal — an
 // unknown model resolving to default limits is exactly the bug this replaces.
 
-import { MINIMAX_API_MODEL_CATALOG, type PresetKey } from './config.js';
+import { KILO_API_MODEL_CATALOG, type PresetKey } from './config.js';
 import { resolveProviderAuthMode } from './provider-auth-mode.js';
 
 /** Reserved provider ids, mirrored by the local-runtime model-key parsers. */
-export const MANAGED_MINIMAX_PROVIDER_ID = 'minimax';
-export const MINIMAX_API_PROVIDER_ID = 'minimax_api';
+export const KILO_PROVIDER_ID = 'kilo';
+export const KILO_API_PROVIDER_ID = 'kilo_api';
 export const CUSTOM_PROVIDER_ID_PREFIX = 'custom_provider:';
 
 /** Which upstream a selected model would actually be called through. */
 export type ModelCallRoute =
-  | 'managed_token_plan'
-  | 'minimax_api_key'
+  | 'kilo_gateway'
+  | 'kilo_api_key'
   | 'custom_provider'
   | 'configured_provider';
 
@@ -73,41 +73,46 @@ export type ModelAvailability =
       readonly message: string;
     };
 
-/** Shared cache-compatibility policy for MiniMax's first-party Messages route. */
+/**
+ * Cache-compatibility policy for the builtin provider's Messages route.
+ *
+ * Kilo speaks `openai-completions`, so no builtin route satisfies this today.
+ * The predicate is retained for the resolver's generic BYOK path, where a
+ * user-configured Anthropic-compatible provider under the reserved ids would
+ * still need the first-party cache rules.
+ */
 export function isFirstPartyMinimaxMessagesRoute(api: string, providerId: string): boolean {
   return (
     api === 'anthropic-messages' &&
-    (providerId === MANAGED_MINIMAX_PROVIDER_ID || providerId === MINIMAX_API_PROVIDER_ID)
+    (providerId === KILO_PROVIDER_ID || providerId === KILO_API_PROVIDER_ID)
   );
 }
 
 /**
- * The route a provider id resolves to. `provider.minimax` is not a fixed
- * route: with `minimaxModelSource = 'minimax_api_key'` the very same builtin
- * entry is called with the user's own key, so it must be judged against the
- * API catalog rather than the managed active set.
+ * The route a provider id resolves to.
+ *
+ * Kilo is a single OpenAI-compatible gateway reached with one credential, so
+ * the historic managed-token-plan vs. user-key split collapses: `provider.kilo`
+ * is always the gateway, whether the credential came from `KILO_API_KEY` or
+ * from the lock-protected BYOK config tree. `kilo_api` remains a distinct id
+ * only so a hand-written second entry can address the same gateway.
  */
 export function resolveModelCallRoute(
   config: ModelAvailabilityConfigView,
   providerId: string,
 ): ModelCallRoute {
-  if (providerId === MINIMAX_API_PROVIDER_ID) return 'minimax_api_key';
+  if (providerId === KILO_API_PROVIDER_ID) return 'kilo_api_key';
   if (providerId.startsWith(CUSTOM_PROVIDER_ID_PREFIX)) return 'custom_provider';
-  if (providerId !== MANAGED_MINIMAX_PROVIDER_ID) return 'configured_provider';
-  if (config.minimaxModelSource === 'minimax_api_key') return 'minimax_api_key';
-  const options = config.provider?.[providerId]?.options;
-  const authMode = resolveProviderAuthMode({
-    authMode: options?.authMode,
-    baseURL: options?.baseURL,
-  }).authMode;
-  return authMode === 'managed-login' ? 'managed_token_plan' : 'configured_provider';
+  if (providerId !== KILO_PROVIDER_ID) return 'configured_provider';
+  return 'kilo_gateway';
 }
 
 /**
- * Model ids the given provider id may actually call right now. The managed
- * token-plan route is capped by the preset active set; every other route keeps
- * what the user configured (a token-plan retirement must not shrink a BYOK
- * route).
+ * Model ids the given provider id may actually call right now.
+ *
+ * The Kilo gateway is called with a user-supplied credential, so its model set
+ * is the shipped catalog; every other route keeps exactly what the user
+ * configured.
  */
 export function listRouteModelIds(
   config: ModelAvailabilityConfigView,
@@ -116,11 +121,15 @@ export function listRouteModelIds(
 ): readonly string[] {
   const route = resolveModelCallRoute(config, providerId);
   switch (route) {
-    case 'managed_token_plan': {
-      return configuredModelIds(config.provider?.[providerId], true);
+    case 'kilo_gateway': {
+      // Provider entry wins when present so a disabled model stays disabled;
+      // the shipped catalog is the fallback for a profile that has not been
+      // written yet.
+      const configured = configuredModelIds(config.provider?.[providerId], true);
+      return configured.length > 0 ? configured : Object.keys(KILO_API_MODEL_CATALOG);
     }
-    case 'minimax_api_key': {
-      return Object.keys(MINIMAX_API_MODEL_CATALOG);
+    case 'kilo_api_key': {
+      return Object.keys(KILO_API_MODEL_CATALOG);
     }
     case 'custom_provider': {
       const provider = config.custom_provider?.[providerId.slice(CUSTOM_PROVIDER_ID_PREFIX.length)];

@@ -2,7 +2,7 @@ import { getRuntimePresetKey, resolveModelAvailability } from '@mavis/config';
 import { ThinkingLevel } from '@mavis/protocol';
 
 import type { LocalConversationRuntimeConfig, LocalModelConfig } from '../contracts.js';
-import { MANAGED_MINIMAX_PROVIDER_ID, MINIMAX_API_PROVIDER_ID } from '../identity.js';
+import { KILO_PROVIDER_ID, KILO_API_PROVIDER_ID } from '../identity.js';
 import { modelConfigForRef } from './list-models.js';
 import { resolveLegacyMinimaxModel } from './model-selection.js';
 import {
@@ -208,7 +208,7 @@ export function resolveAgentModelSelection(input: {
   const context = resolveSelectionContext(input);
   const { sources, modelIndex, modelSource, model, modelConfig, contributors } = context;
   if (
-    model.providerId === MANAGED_MINIMAX_PROVIDER_ID &&
+    model.providerId === KILO_PROVIDER_ID &&
     input.config.minimaxModelSource !== 'minimax_api_key'
   )
     return resolveManagedAgentSelection(input.config, context);
@@ -378,8 +378,8 @@ function hasM3ContextTiers(
 ): boolean {
   return (
     model.modelId === MINIMAX_M3_MODEL_ID &&
-    (model.providerId === MANAGED_MINIMAX_PROVIDER_ID ||
-      model.providerId === MINIMAX_API_PROVIDER_ID) &&
+    (model.providerId === KILO_PROVIDER_ID ||
+      model.providerId === KILO_API_PROVIDER_ID) &&
     contextDefault !== undefined
   );
 }
@@ -466,7 +466,7 @@ function resolveModelCatalogReference(
   if (
     !source.allowCustomProviderPrefixFallback ||
     modelConfig ||
-    model.providerId === MANAGED_MINIMAX_PROVIDER_ID ||
+    model.providerId === KILO_PROVIDER_ID ||
     Object.hasOwn(config.provider, model.providerId)
   ) {
     return { model, modelConfig };

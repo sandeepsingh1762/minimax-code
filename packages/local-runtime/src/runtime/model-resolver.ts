@@ -5,6 +5,8 @@ import type { LLMModelConfig } from '@mavis/agent-core/pi-turn-runner';
 import { withOpenCodeGoHeaders, withOpenRouterAttributionHeaders } from '@mavis/shared';
 import { logger } from '../common/logger.js';
 import {
+  KILO_API_PROVIDER_ID,
+  KILO_PROVIDER_ID,
   isManagedProviderBaseUrl,
   resolveProviderAuthMode,
   type ProviderAuthMode,
@@ -189,7 +191,7 @@ export class LocalModelResolver implements LocalModelResolverLike {
               byok,
               providerConfig,
               modelId,
-              catalog: lookupLocalModelLimits('minimax', modelId),
+              catalog: lookupLocalModelLimits(KILO_PROVIDER_ID, modelId),
             })
           : planCustomProviderResolution({
               byok,
@@ -225,14 +227,14 @@ export class LocalModelResolver implements LocalModelResolverLike {
 
     // Source-aware routing: when minimaxModelSource is 'minimax_api_key',
     // route minimax models through the user's own API key instead of managed-login.
-    if (provider === 'minimax') {
+    if (provider === KILO_PROVIDER_ID) {
       const byok = this.byokConfigGetter?.();
       if (byok?.minimaxModelSource === 'minimax_api_key') {
         const plan = planMinimaxApiResolution({
           byok,
           providerConfig,
           modelId,
-          catalog: lookupLocalModelLimits('minimax', modelId),
+          catalog: lookupLocalModelLimits(KILO_PROVIDER_ID, modelId),
         });
         if (plan) {
           logger.info(
@@ -242,7 +244,7 @@ export class LocalModelResolver implements LocalModelResolverLike {
               route: 'minimax_api_key',
               minimaxModelSource: byok.minimaxModelSource,
             },
-            '[model-resolve-route] minimax_api_key — minimax model routed through user API key',
+            '[model-resolve-route] minimax_api_key — Kilo model routed through user API key',
           );
           const resolvedPlan = await resolveByokResolutionPlan(plan, this.providerAuthGetter);
           return this.finishResolve({
@@ -257,7 +259,7 @@ export class LocalModelResolver implements LocalModelResolverLike {
           });
         }
         throw new Error(
-          `LocalModelResolver: BYOK model configuration "minimax_api/${modelId}" is unavailable or disabled.`,
+          `LocalModelResolver: BYOK model configuration "${KILO_API_PROVIDER_ID}/${modelId}" is unavailable or disabled.`,
         );
       } else if (byok && !byok.minimaxModelSource) {
         logger.info(
@@ -278,7 +280,14 @@ export class LocalModelResolver implements LocalModelResolverLike {
     const providerAuthKey = isOpenAiCodex
       ? (await this.providerAuthGetter?.(provider))?.trim()
       : undefined;
-    const apiKey = isOpenAiCodex ? providerAuthKey : credentials.apiKey;
+    const apiKey = isOpenAiCodex
+      ? providerAuthKey
+      : (credentials.apiKey ||
+          (provider === 'kilo'
+            ? (this.options.byokConfigGetter?.()?.minimax_api?.apiKey?.trim() ||
+                process.env.KILO_API_KEY?.trim() ||
+                process.env.MCODE_PROVIDER_API_KEY?.trim())
+            : undefined));
     const baseUrl = credentials.baseUrl ?? (isOpenAiCodex ? limits.baseUrl : undefined);
     if (!apiKey) {
       if (provider === OPENAI_CODEX_PROVIDER) {

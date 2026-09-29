@@ -4,7 +4,7 @@
 import { maskSecret } from '../secret.js';
 import {
   CUSTOM_PROVIDER_ID_PREFIX,
-  MINIMAX_API_PROVIDER_ID,
+  KILO_API_PROVIDER_ID,
   formatModelKey,
   parseSourceQualifiedModelKey,
 } from '../resolution/model-key.js';
@@ -17,6 +17,7 @@ import type {
   ModelProviderView,
 } from '../contracts.js';
 import { modelConnectionTestFingerprint } from './config-fingerprint.js';
+import { KILO_PROVIDER_ID } from '../identity.js';
 import {
   MINIMAX_API_FORMAT,
   MINIMAX_API_PROVIDER_NAME,
@@ -54,7 +55,7 @@ export function buildBuiltinProviderView(
   const providerName = provider.name ?? providerId;
   const providerKind = builtinProviderKind(config, providerId, provider);
   const models =
-    providerId === 'minimax' && config.minimaxModelSource === 'minimax_api_key'
+    providerId === KILO_PROVIDER_ID && config.minimaxModelSource === 'minimax_api_key'
       ? minimaxApiModels(config)
       : (provider.models ?? {});
   return {
@@ -85,7 +86,7 @@ export function buildMinimaxProviderView(
 ): ModelProviderView {
   const apiKey = config.minimax_api?.apiKey?.trim();
   return {
-    providerId: MINIMAX_API_PROVIDER_ID,
+    providerId: KILO_API_PROVIDER_ID,
     name: MINIMAX_API_PROVIDER_NAME,
     source: 'minimax_api',
     kind: 'minimax-api-key',
@@ -95,13 +96,13 @@ export function buildMinimaxProviderView(
     hasApiKey: Boolean(apiKey),
     ...(apiKey ? { maskedApiKey: maskSecret(apiKey) } : {}),
     models: providerModelEntries(config, cache, {
-      providerId: MINIMAX_API_PROVIDER_ID,
+      providerId: KILO_API_PROVIDER_ID,
       models: minimaxApiModels(config),
       providerSource: 'minimax_api',
       providerKind: 'minimax-api-key',
       providerName: MINIMAX_API_PROVIDER_NAME,
     }),
-    ...(statusOf(cache, MINIMAX_API_PROVIDER_ID) ?? {}),
+    ...(statusOf(cache, KILO_API_PROVIDER_ID) ?? {}),
   };
 }
 

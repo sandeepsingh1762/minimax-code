@@ -1,4 +1,8 @@
-import { resolveCanonicalSubagentRole } from '@mavis/agent-tools/desktop/subagent-roles';
+import {
+  isCanonicalSubagentRole,
+  resolveCanonicalSubagentRole,
+  type CanonicalSubagentRole,
+} from '@mavis/agent-tools/desktop/subagent-roles';
 import type { LocalTaskRunResult, VerificationReport } from '@mavis/agent-tools/desktop';
 
 import type { ModuleMetricsReporter } from '../common/metrics.js';
@@ -31,7 +35,8 @@ const SUBAGENT_TELEMETRY_METRIC = {
   [SUBAGENT_TELEMETRY_EVENT.finish]: 'subagent_finish_total',
 } as const;
 
-export type SubagentRoleClass = 'explore' | 'worker' | 'verifier' | 'other';
+/** Derived from the canonical role table so a new role is never metered as `other`. */
+export type SubagentRoleClass = CanonicalSubagentRole | 'other';
 export type AgentResourceKind = 'memory' | 'skill' | 'cron' | 'channel';
 
 type TelemetryValue = string | boolean | number;
@@ -76,8 +81,7 @@ export function emitResourceAmbiguityTelemetry(
 }
 
 export function roleClass(value: unknown): SubagentRoleClass {
-  if (value === 'explore' || value === 'worker' || value === 'verifier') return value;
-  return 'other';
+  return typeof value === 'string' && isCanonicalSubagentRole(value) ? value : 'other';
 }
 
 export function memberCountBucket(value: number | undefined): '1' | '2' | '3+' | undefined {

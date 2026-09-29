@@ -1,4 +1,9 @@
-import { getRuntimePresetKey, listRouteModelIds, resolveProviderAuthMode } from '@mavis/config';
+import {
+  KILO_PROVIDER_ID,
+  getRuntimePresetKey,
+  listRouteModelIds,
+  resolveProviderAuthMode,
+} from '@mavis/config';
 
 import type {
   LocalCustomProviderConfig,
@@ -8,7 +13,7 @@ import type {
 } from '../config/types.js';
 import {
   CUSTOM_PROVIDER_ID_PREFIX,
-  MINIMAX_API_PROVIDER_ID,
+  KILO_API_PROVIDER_ID,
   formatModelKey,
   parseProviderId,
 } from '../config/model-key.js';
@@ -48,7 +53,7 @@ export function builtinProviderKind(
   }).authMode;
   if (authMode === 'oauth') return 'oauth';
   return authMode === 'managed-login' &&
-    !(providerId === 'minimax' && config.minimaxModelSource === 'minimax_api_key')
+    !(providerId === KILO_PROVIDER_ID && config.minimaxModelSource === 'minimax_api_key')
     ? 'minimax-managed'
     : 'minimax-api-key';
 }
@@ -64,10 +69,10 @@ export function routeModelEntries(
   provider: LocalProviderConfig,
 ): Array<[string, LocalModelConfig]> {
   const usesMinimaxApiCatalog =
-    providerId === MINIMAX_API_PROVIDER_ID ||
-    (providerId === 'minimax' && config.minimaxModelSource === 'minimax_api_key');
+    providerId === KILO_API_PROVIDER_ID ||
+    (providerId === KILO_PROVIDER_ID && config.minimaxModelSource === 'minimax_api_key');
   const configured = usesMinimaxApiCatalog ? minimaxApiModels(config) : (provider.models ?? {});
-  const fallback = providerId === 'minimax' ? minimaxApiModels(config) : {};
+  const fallback = providerId === KILO_PROVIDER_ID ? minimaxApiModels(config) : {};
   return listRouteModelIds(config, providerId, getRuntimePresetKey()).flatMap((modelId) => {
     const model = configured[modelId] ?? fallback[modelId];
     return model ? [[modelId, model] as [string, LocalModelConfig]] : [];
@@ -82,7 +87,7 @@ export function modelConfigForRef(
   const parsed = parseProviderId(provider);
   if (
     parsed?.source === 'minimax_api' ||
-    (provider === 'minimax' && config.minimaxModelSource === 'minimax_api_key')
+    (provider === KILO_PROVIDER_ID && config.minimaxModelSource === 'minimax_api_key')
   ) {
     return minimaxApiModels(config)[modelId];
   }

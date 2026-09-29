@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import yaml from 'js-yaml';
 import { restrictConfigFileSync, writePrivateConfigFileSync } from './private-config-file.js';
+import { KILO_PROVIDER_ID, resolveKiloApiKey } from './kilo-provider.js';
 
 import type {
   CustomProvidersConfig,
@@ -42,12 +43,12 @@ export function applyManagedMinimaxContextLimits(
   provider: ModelsConfig,
   contextLimits: Record<string, number> | undefined,
 ): ModelsConfig {
-  const minimax = provider.minimax;
-  if (!minimax?.models || !contextLimits) return provider;
+  const managed = provider[KILO_PROVIDER_ID];
+  if (!managed?.models || !contextLimits) return provider;
 
   let changed = false;
   const models = Object.fromEntries(
-    Object.entries(minimax.models).map(([modelId, model]) => {
+    Object.entries(managed.models).map(([modelId, model]) => {
       const context = contextLimits[modelId];
       if (
         context === undefined ||
@@ -61,7 +62,53 @@ export function applyManagedMinimaxContextLimits(
     }),
   );
 
-  return changed ? { ...provider, minimax: { ...minimax, models } } : provider;
+  return changed ? { ...provider, [KILO_PROVIDER_ID]: { ...managed, models } } : provider;
+}
+
+/**
+ * Inject the resolved Kilo gateway credential into the effective provider tree.
+ *
+ * The shipped preset entry deliberately carries no key — a committed literal
+ * would fail this repository's Gitleaks/credential scan — so a profile is only
+ * callable once a credential is resolved. `resolveKiloApiKey` puts
+ * `KILO_API_KEY` ahead of the persisted value; when neither yields a key the
+ * entry is returned untouched, so the resolver keeps reporting "api_key not
+ * configured" instead of this layer inventing one.
+ *
+ * This runs on every config read, which is what keeps the credential out of
+ * `config.yaml`: the only writers dump the raw parsed document, never the
+ * effective provider tree built here.
+ */
+export function applyKiloCredential(
+  provider: ModelsConfig,
+  presetProvider?: ProviderConfig,
+  persistedApiKey?: string,
+): ModelsConfig {
+  const existing = provider[KILO_PROVIDER_ID];
+  const apiKey = resolveKiloApiKey(persistedApiKey ?? existing?.options?.apiKey);
+  if (!apiKey) return provider;
+
+  if (!existing) {
+    // No `kilo` entry at all (non-managed first run): rebuild it from the
+    // preset so the shipped catalog and endpoint ride along with the key.
+    if (!presetProvider) return provider;
+    return {
+      ...provider,
+      [KILO_PROVIDER_ID]: {
+        ...presetProvider,
+        options: { ...presetProvider.options, apiKey },
+      },
+    };
+  }
+
+  if (existing.options?.apiKey === apiKey) return provider;
+  return {
+    ...provider,
+    [KILO_PROVIDER_ID]: {
+      ...existing,
+      options: { ...existing.options, apiKey },
+    },
+  };
 }
 
 export function parseCustomProvidersConfig(raw: unknown): CustomProvidersConfig | undefined {
@@ -257,25 +304,25 @@ export function migrateLegacyByokProvidersOnDisk(
 
 // config.yaml lives in the user-writable dataDir, so the provider tree cannot
 // be trusted as-is: the builtin managed provider may be deleted or hand-edited.
-// In managed runtime every read restores a usable `provider.minimax`: a missing
+// In managed runtime every read restores a usable `provider.kilo`: a missing
 // or gutted entry is rebuilt from the current preset and missing models/npm are
 // backfilled. Protected builds additionally force `baseURL` and `authMode` back
 // to the current preset with managed-login. Test builds deliberately preserve
 // existing connection fields so developers can route the builtin provider
 // through a local fault-injection proxy. In non-managed dev/runtime, an existing
-// `provider.minimax` that explicitly points at a managed preset gateway still
+// `provider.kilo` that explicitly points at a managed preset gateway still
 // gets the built-in model table only when its managed snapshot is absent, but
-// custom endpoints are left untouched. `provider.minimax` remains the builtin managed provider; user
-// BYOK for protected builds lives exclusively in the `minimax_api` /
-// `custom_provider` trees. The result is never written back to disk, and
-// user-owned trees (`minimax_api`, `custom_provider`) are never touched.
-// Selection fallback for a dangling defaultModel is owned by the models/select
-// layer, not by this read path.
+// custom endpoints are left untouched. `provider.kilo` remains the builtin
+// managed provider; user BYOK for protected builds lives exclusively in the
+// `minimax_api` / `custom_provider` trees. The result is never written back to
+// disk, and user-owned trees (`minimax_api`, `custom_provider`) are never
+// touched. Selection fallback for a dangling defaultModel is owned by the
+// models/select layer, not by this read path.
 //
-// `minimax_api` is additionally a reserved provider id: the resolver matches
-// it before falling back to the legacy provider map, so a hand-written
-// `provider.minimax_api` entry would be permanently shadowed. It is dropped
-// from the effective view with a warning (in every runtime mode).
+// `minimax_api` is additionally a reserved provider id in upgraded profiles:
+// the resolver matched it before falling back to the legacy provider map, so a
+// hand-written `provider.minimax_api` entry is dropped from the effective view
+// with a warning (in every runtime mode).
 export function applyRequiredProviderOverrides(
   input: { provider: ModelsConfig; defaultModel?: string },
   deps: RequiredProviderOverrideDeps,
@@ -292,12 +339,20 @@ export function applyRequiredProviderOverrides(
   }
 
   const preset = deps.getManagedPreset();
-  const presetProvider = preset.provider.minimax as ProviderConfig;
-  const existing = provider.minimax;
+  const presetProvider = preset.provider[KILO_PROVIDER_ID] as
+    | ProviderConfig
+    | undefined;
+  const existing = provider[KILO_PROVIDER_ID];
   const managedRuntime = deps.isManagedRuntime();
   const shouldBackfillManagedMinimax =
     managedRuntime || isManagedOriginMinimaxProvider(existing, deps);
   if (!shouldBackfillManagedMinimax) return { provider, defaultModel };
+
+  // The preset no longer guarantees a builtin entry (the managed tree moved to
+  // `provider.kilo`, and a preset rebuilt from a partial config may omit it).
+  // Backfilling is best-effort: without a preset entry there is nothing to
+  // restore, and we must not throw while reading config.
+  if (!presetProvider) return { provider, defaultModel };
 
   const existingOptions = existing?.options;
   const enforceProtection = managedRuntime && deps.shouldEnforceManagedProviderProtection();
@@ -323,7 +378,7 @@ export function applyRequiredProviderOverrides(
 
   provider = {
     ...provider,
-    minimax: {
+    [KILO_PROVIDER_ID]: {
       ...presetProvider,
       ...(existing ?? {}),
       npm: existing?.npm ?? presetProvider.npm,
@@ -332,8 +387,12 @@ export function applyRequiredProviderOverrides(
         ...(presetProvider.options ?? {}),
         ...(existingOptions ?? {}),
         ...(dropPairedApiKey ? { apiKey: presetProvider.options?.apiKey } : {}),
+        // Kilo is a BYOK gateway: the credential comes from `KILO_API_KEY` or
+        // the persisted config, never from a managed login token. Protection
+        // therefore pins `baseURL` to the preset origin and pins `authMode` to
+        // `api-key` rather than the historic `managed-login`.
         ...(enforceProtection
-          ? { authMode: 'managed-login', baseURL: presetProvider.options?.baseURL }
+          ? { authMode: 'api-key', baseURL: presetProvider.options?.baseURL }
           : {}),
       },
     },
@@ -369,6 +428,25 @@ function readRawConfigForMigration(configPath: string): Record<string, unknown> 
   }
 }
 
+/**
+ * Provider ids that must never be migrated into a `custom_provider` alias.
+ *
+ * `KILO_PROVIDER_ID` is the managed route and `kilo_api` is the reserved BYOK
+ * id: the model-key parsers match `kilo_api` before the legacy provider map, so
+ * an aliased copy would be permanently shadowed. The `minimax` / `minimax_api`
+ * pair is kept because an upgraded profile can still carry those keys and
+ * rewriting them would change an existing profile's provider tree. The id is
+ * spelled literally here: `./model-availability.js` owns it, and importing it
+ * would close the byok-config -> model-availability -> config -> byok-config
+ * runtime cycle.
+ */
+const NON_MIGRATABLE_PROVIDER_IDS = new Set<string>([
+  KILO_PROVIDER_ID,
+  'kilo_api',
+  'minimax',
+  'minimax_api',
+]);
+
 function shouldMigrateLegacyProvider(
   providerId: string,
   providerConfig: unknown,
@@ -376,7 +454,7 @@ function shouldMigrateLegacyProvider(
 ): providerConfig is Record<string, unknown> {
   // Builtin identity is stable even when old config contains a proxy endpoint.
   // Never turn an official Session choice into an API-key provider alias.
-  if (providerId === 'minimax' || providerId === 'minimax_api') return false;
+  if (NON_MIGRATABLE_PROVIDER_IDS.has(providerId)) return false;
   if (!isProviderLikeRecord(providerConfig)) return false;
   if (!hasLegacyByokProviderShape(providerConfig)) return false;
   return !Object.prototype.hasOwnProperty.call(managedProvider, providerId);

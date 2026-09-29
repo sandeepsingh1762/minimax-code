@@ -21,8 +21,9 @@ import {
 } from "../../local-runtime/src/config/update.js";
 
 const secret = "synthetic-config-preservation-key";
+/** Both writers key on the same managed provider id; they are separate writers. */
 const contextInput = {
-  providerId: "minimax",
+  providerId: "kilo",
   modelId: "synthetic-model",
   expectedContextLimit: 100,
   contextLimit: 200,
@@ -52,7 +53,7 @@ const writers = [
   ],
   [
     "model selection",
-    () => updateLocalModelSelection({ modelKey: "minimax/synthetic-model" }),
+    () => updateLocalModelSelection({ modelKey: "kilo/synthetic-model" }),
   ],
   [
     "BYOK",

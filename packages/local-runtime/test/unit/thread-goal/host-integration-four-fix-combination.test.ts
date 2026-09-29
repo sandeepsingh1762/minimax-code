@@ -254,20 +254,26 @@ describe("Goal consolidated MR cross-fix combination", () => {
 
   it("still pauses on three consecutive tool-less Turns once the user stops intervening", async () => {
     // The reset must interrupt the run, not disable the policy: the approved
-    // threshold stays 3 and the outcome stays `paused`, never `complete`.
+    // threshold stays in force and the outcome stays `paused`, never
+    // `complete`. The threshold is bound explicitly here so the scenario does
+    // not silently re-scope when the shipped default changes.
+    const repeatedReplyLimit = 3;
+    integration.bindConfigGetter(() => ({
+      goal: { breaker: { repeatedReplyLimit } },
+    }));
     let goal = await seedRunningGoal();
     for (const turnId of ["turn_a", "turn_b"]) {
       await admitGoalTurn(goal, turnId);
       await settleToolLessGoalTurn(turnId, `distinct reply ${turnId}`);
       goal = await currentGoal();
     }
-    expect(goal).toMatchObject({ noToolStreak: 2, status: "active" });
+    expect(goal).toMatchObject({ noToolStreak: repeatedReplyLimit - 1, status: "active" });
 
     await admitGoalTurn(goal, "turn_c");
     await settleToolLessGoalTurn("turn_c", "distinct reply turn_c");
 
     const paused = await currentGoal();
-    expect(paused).toMatchObject({ noToolStreak: 3, status: "paused" });
+    expect(paused).toMatchObject({ noToolStreak: repeatedReplyLimit, status: "paused" });
     expect(paused.status).not.toBe("completed");
   });
 

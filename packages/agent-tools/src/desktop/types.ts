@@ -20,6 +20,7 @@ import type {
   LocalMemoryToolInput,
   LocalMavisToolInput,
   LocalCodeReviewToolInput,
+  LocalPentestFindingsToolInput,
 } from './builtin-defs.js';
 import type { WebSearchInput } from '../shared/web-search.js';
 
@@ -528,6 +529,107 @@ export interface LocalMemoryAdapter {
     input: LocalMemoryToolInput,
     signal?: AbortSignal,
   ): Promise<{ text: string; details?: Record<string, unknown> }>;
+}
+
+/**
+ * Active-probe transports. The set is deliberately closed and small: it names
+ * *how* bytes travel, never *what* to test. No vulnerability class, payload or
+ * scan method is encoded here, because the model chooses those.
+ */
+export type LocalPentestProbeTransport = 'http' | 'tcp' | 'dns' | 'tls';
+
+/** Stable, user-safe classification for a probe that could not be completed. */
+export type LocalPentestProbeFailureReason =
+  | 'aborted'
+  | 'invalid_request'
+  | 'invalid_payload'
+  | 'timeout'
+  | 'network_error'
+  | 'dns_error'
+  | 'tls_error'
+  | 'tcp_error'
+  | 'out_of_scope'
+  | 'adapter_failed';
+
+export interface LocalPentestProbeHttpRequest {
+  readonly url: string;
+  readonly method?: string;
+  readonly headers?: Readonly<Record<string, string>>;
+  readonly body?: string;
+  readonly timeoutMs?: number;
+  readonly followRedirects?: boolean;
+}
+
+export interface LocalPentestProbeTcpRequest {
+  readonly host: string;
+  readonly port: number;
+  readonly timeoutMs?: number;
+  readonly sendHex?: string;
+}
+
+export interface LocalPentestProbeDnsRequest {
+  readonly host: string;
+  readonly recordType?: string;
+  readonly resolver?: string;
+}
+
+export interface LocalPentestProbeTlsRequest {
+  readonly host: string;
+  readonly port?: number;
+  readonly timeoutMs?: number;
+}
+
+/**
+ * A validated probe request. The desktop tool resolves the schema default and
+ * proves that the payload matches `transport` before building this, so an
+ * adapter may rely on the matching payload being present and unambiguous.
+ */
+export interface LocalPentestProbeRequest {
+  readonly transport: LocalPentestProbeTransport;
+  readonly http?: LocalPentestProbeHttpRequest;
+  readonly tcp?: LocalPentestProbeTcpRequest;
+  readonly dns?: LocalPentestProbeDnsRequest;
+  readonly tls?: LocalPentestProbeTlsRequest;
+  readonly notes?: string;
+}
+
+/**
+ * One probe's normalized evidence. `ok` reports whether the probe *completed*,
+ * not whether the target behaved well: a 403, a refused connection and a failed
+ * certificate validation are all `ok: true` results that carry evidence. Only
+ * an aborted, malformed, timed-out or unreachable probe is `ok: false`.
+ */
+export interface LocalPentestProbeOutcome {
+  readonly ok: boolean;
+  readonly reason?: LocalPentestProbeFailureReason;
+  /** Compact, evidence-oriented body for the model. */
+  readonly text: string;
+  /** Structured evidence: status, header subset, body excerpt, timings, addresses, cert fields. */
+  readonly details: Record<string, unknown>;
+}
+
+/**
+ * Host-side active-probe delegate for `pentest_probe`. This layer owns no
+ * network stack and no timeout policy: it receives a validated request and
+ * returns whatever the target actually said. The local-runtime implementation
+ * injects `fetchImpl` and the Node built-ins.
+ */
+export interface LocalPentestProbeAdapter {
+  probe(request: LocalPentestProbeRequest, signal?: AbortSignal): Promise<LocalPentestProbeOutcome>;
+}
+
+/**
+ * Ledger delegate for `pentest_findings`. Mirrors `LocalMemoryAdapter`, plus an
+ * explicit `isError` so a rejected transition reaches the model as a readable
+ * failure instead of an exception the runtime would flatten to a generic
+ * "Tool execution error".
+ */
+export interface LocalPentestFindingsAdapter {
+  execute(
+    ctx: LocalRuntimeToolContext,
+    input: LocalPentestFindingsToolInput,
+    signal?: AbortSignal,
+  ): Promise<{ text: string; details?: Record<string, unknown>; isError?: boolean }>;
 }
 
 export interface LocalMavisAgentDetail {

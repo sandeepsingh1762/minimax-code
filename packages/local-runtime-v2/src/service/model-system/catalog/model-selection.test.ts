@@ -48,7 +48,7 @@ it('uses historical model values only for missing columns and preserves explicit
   });
 });
 
-it.each(['minimax', 'custom_provider:work'])(
+it.each(['kilo', 'custom_provider:work'])(
   'preserves explicit BYOK parameters through ordinary create for %s',
   (providerId) => {
     const configuredModel = {
@@ -58,13 +58,13 @@ it.each(['minimax', 'custom_provider:work'])(
     };
     const config: LocalRuntimeConfig = {
       dataDir: '/isolated-byok-selection',
-      ...(providerId === 'minimax' ? { minimaxModelSource: 'minimax_api_key' as const } : {}),
-      provider: { minimax: { models: { 'MiniMax-M3': configuredModel } } },
-      custom_provider: { work: { models: { 'MiniMax-M3': configuredModel } } },
+      ...(providerId === 'kilo' ? { minimaxModelSource: 'minimax_api_key' as const } : {}),
+      provider: { kilo: { models: { 'kilo-auto/free': configuredModel } } },
+      custom_provider: { work: { models: { 'kilo-auto/free': configuredModel } } },
     };
     const requested = {
       providerId,
-      modelId: 'MiniMax-M3',
+      modelId: 'kilo-auto/free',
       variant: 'thinking',
       contextLimit: 450_000,
       thinking: { effort: 'provider-effort' },
@@ -104,8 +104,10 @@ describe('legacy MiniMax compatibility', () => {
           modelId: 'retired',
         }),
       ).toEqual({
-        providerId: 'minimax',
-        modelId: 'MiniMax-M3',
+        // The retired model has no official MiniMax replacement any more, so the
+        // recovery lands on the Kilo gateway default the preset ships.
+        providerId: 'kilo',
+        modelId: 'kilo-auto/free',
       });
       expect(config).toEqual(before);
       config.custom_provider![key]!.options!.baseURL = 'https://proxy.example/v1';
@@ -166,6 +168,8 @@ describe('model selection input', () => {
 });
 
 describe('ordinary session inherits the selected global effort', () => {
+  const selectedModelId = 'kilo-auto/free';
+  const otherModelId = 'qwen/qwen3.8-27b:free';
   const model = {
     limit: { context: 512_000, output: 16_000 },
     contextWindowOptions: [512_000, 1_000_000],
@@ -174,16 +178,16 @@ describe('ordinary session inherits the selected global effort', () => {
   };
   const config: LocalRuntimeConfig = {
     dataDir: '/tmp/global-effort-create',
-    defaultModel: 'minimax/MiniMax-M3.1',
+    defaultModel: `kilo/${selectedModelId}`,
     defaultModelThinking: { effort: 'xhigh' },
-    provider: { minimax: { models: { 'MiniMax-M3.1': model, 'MiniMax-M3': model } } },
+    provider: { kilo: { models: { [selectedModelId]: model, [otherModelId]: model } } },
   };
 
   it('freezes the global effort when creation supplies only the selected model', () => {
     expect(
       resolveRequestedSessionModel(config, {
-        providerId: 'minimax',
-        modelId: 'MiniMax-M3.1',
+        providerId: 'kilo',
+        modelId: selectedModelId,
         reasoning: true,
       }).thinking,
     ).toEqual({ effort: 'xhigh' });
@@ -192,19 +196,19 @@ describe('ordinary session inherits the selected global effort', () => {
   it('preserves an explicit per-session effort', () => {
     expect(
       resolveRequestedSessionModel(config, {
-        providerId: 'minimax',
-        modelId: 'MiniMax-M3.1',
+        providerId: 'kilo',
+        modelId: selectedModelId,
         thinking: { effort: 'low' },
       }).thinking,
     ).toEqual({ effort: 'low' });
   });
 
   it('does not inherit effort from a different global model', () => {
-    const otherDefault = { ...config, defaultModel: 'minimax/MiniMax-M3' };
+    const otherDefault = { ...config, defaultModel: `kilo/${otherModelId}` };
     expect(
       resolveRequestedSessionModel(otherDefault, {
-        providerId: 'minimax',
-        modelId: 'MiniMax-M3.1',
+        providerId: 'kilo',
+        modelId: selectedModelId,
       }).thinking,
     ).toEqual({ effort: 'high' });
   });

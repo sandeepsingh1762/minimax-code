@@ -14,13 +14,14 @@ import {
   type PromptReadSnapshot,
 } from '@mavis/agent-runtime';
 
-import type {
-  AgentAppMode,
-  AgentPromptMode,
-  AgentPromptSnapshot,
-  AgentPromptChannel,
-  AgentStoreIdentity,
-  BuiltinAgentDefinition,
+import {
+  AGENT_PROMPT_MODES,
+  type AgentAppMode,
+  type AgentPromptMode,
+  type AgentPromptSnapshot,
+  type AgentPromptChannel,
+  type AgentStoreIdentity,
+  type BuiltinAgentDefinition,
 } from '../contracts.js';
 import {
   BUILTIN_ROSTER_FILE,
@@ -602,8 +603,28 @@ export class BuiltinAgentCatalog {
   }
 }
 
+/**
+ * `pentest` is an engagement family, not a product app mode, so it is resolved
+ * here rather than derived from `appMode` (which stays `coding` | `work` for the
+ * V1 mode-asset layout). Precedence: the request's explicit validated mode, then
+ * the `MAVIS_AGENT_PROMPT_MODE` engagement opt-in, then the TUI/desktop and
+ * appMode fallbacks. An unknown opt-in value is ignored rather than thrown so a
+ * stale environment cannot brick Session start-up; the explicit path stays the
+ * validated one and is what a saved Task can be replayed under.
+ */
 function resolvePromptMode(input: BuiltinRenderInput): AgentPromptMode {
-  return input.promptMode ?? (input.promptProfile === 'tui' ? 'tui' : input.appMode);
+  if (input.promptMode !== undefined) return input.promptMode;
+  const opted = selectedEngagementPromptMode();
+  if (opted !== undefined) return opted;
+  return input.promptProfile === 'tui' ? 'tui' : input.appMode;
+}
+
+function selectedEngagementPromptMode(): AgentPromptMode | undefined {
+  const requested = process.env.MAVIS_AGENT_PROMPT_MODE?.trim().toLowerCase();
+  if (!requested) return undefined;
+  return (AGENT_PROMPT_MODES as readonly string[]).includes(requested)
+    ? (requested as AgentPromptMode)
+    : undefined;
 }
 
 function usesV2Prompts(input: BuiltinRenderInput): boolean {

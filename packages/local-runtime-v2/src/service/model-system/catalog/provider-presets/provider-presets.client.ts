@@ -1,4 +1,9 @@
-import { DEFAULT_MODEL_PRESETS, getRuntimePresetKey, getRuntimeRegion } from '@mavis/config';
+import {
+  DEFAULT_MODEL_PRESETS,
+  KILO_PROVIDER_ID,
+  getRuntimePresetKey,
+  getRuntimeRegion,
+} from '@mavis/config';
 import { MODELS_DEV_CATALOG_SOURCE_URL, type ModelsDevRegion } from '@mavis/shared/models-dev';
 
 export const MODELS_DEV_URL = MODELS_DEV_CATALOG_SOURCE_URL;
@@ -126,10 +131,10 @@ export async function fetchPinnedProviderIdsConfig(options: {
 }
 
 function resolveCommonConfigOrigin(): string {
-  const minimax = DEFAULT_MODEL_PRESETS[getRuntimePresetKey()].provider.minimax;
-  const baseUrl = minimax?.options?.baseURL;
+  const kilo = DEFAULT_MODEL_PRESETS[getRuntimePresetKey()].provider[KILO_PROVIDER_ID];
+  const baseUrl = kilo?.options?.baseURL;
   if (typeof baseUrl !== 'string' || !baseUrl.trim()) {
-    throw new Error('Runtime MiniMax preset has no base URL');
+    throw new Error('Runtime Kilo preset has no base URL');
   }
   return new URL(baseUrl).origin;
 }

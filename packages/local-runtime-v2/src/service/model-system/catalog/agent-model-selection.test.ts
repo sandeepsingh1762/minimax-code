@@ -58,7 +58,7 @@ describe('resolveAgentModelSelection', () => {
         config: {
           ...config,
           provider: {
-            minimax: {
+            kilo: {
               models: {
                 'MiniMax-M3.1': {
                   limit: { context: 512_000, output: 128_000 },
@@ -74,7 +74,7 @@ describe('resolveAgentModelSelection', () => {
           { source: 'agent-override', selection },
           {
             source: 'accepted-parent',
-            selection: { model: 'minimax/MiniMax-M3.1', contextWindow: 1_000_000, effort: 'max' },
+            selection: { model: 'kilo/MiniMax-M3.1', contextWindow: 1_000_000, effort: 'max' },
             parameterSnapshot: { context: 'selection', effort: 'selection' },
           },
         ],
@@ -94,11 +94,11 @@ describe('resolveAgentModelSelection', () => {
   it('uses the managed catalog for task capture, including forced-on defaults and discrete context', () => {
     const managed: LocalConversationRuntimeConfig = {
       ...config,
-      defaultModel: 'minimax/MiniMax-M3.1',
+      defaultModel: 'kilo/MiniMax-M3.1',
       defaultModelThinking: { effort: 'max' },
       defaultModelContextWindow: 1_000_000,
       provider: {
-        minimax: {
+        kilo: {
           models: {
             'MiniMax-M3.1': {
               limit: { context: 512_000, output: 128_000 },
@@ -116,17 +116,17 @@ describe('resolveAgentModelSelection', () => {
         sources: selection ? [{ source: 'task', selection }] : [],
       });
     expect(capture()).toMatchObject({ effort: 'max', contextWindow: 1_000_000 });
-    expect(capture({ model: 'minimax/MiniMax-M3.1' })).toMatchObject({
+    expect(capture({ model: 'kilo/MiniMax-M3.1' })).toMatchObject({
       effort: 'high',
       contextWindow: 512_000,
     });
     expect(
-      capture({ model: 'minimax/MiniMax-M3.1', effort: 'max', contextWindow: 1_000_000 }),
+      capture({ model: 'kilo/MiniMax-M3.1', effort: 'max', contextWindow: 1_000_000 }),
     ).toMatchObject({ effort: 'max', contextWindow: 1_000_000, diagnostics: [] });
-    expect(() => capture({ model: 'minimax/MiniMax-M3.1', effort: 'off' })).toThrow();
-    expect(() => capture({ model: 'minimax/MiniMax-M3.1', contextWindow: 768_000 })).toThrow();
+    expect(() => capture({ model: 'kilo/MiniMax-M3.1', effort: 'off' })).toThrow();
+    expect(() => capture({ model: 'kilo/MiniMax-M3.1', contextWindow: 768_000 })).toThrow();
     expect(() =>
-      capture({ model: 'minimax/MiniMax-M3.1', contextWindow: 2_147_483_648 }),
+      capture({ model: 'kilo/MiniMax-M3.1', contextWindow: 2_147_483_648 }),
     ).toThrow();
   });
   it('captures an official model from a dangling legacy default without changing config', () => {
@@ -135,15 +135,15 @@ describe('resolveAgentModelSelection', () => {
       defaultModel: 'custom_provider:minimax-legacy/retired',
       provider: {
         ...config.provider,
-        minimax: { models: { 'MiniMax-M3': { limit: { context: 512_000, output: 128_000 } } } },
+        kilo: { models: { 'kilo-auto/free': { limit: { context: 256_000, output: 32_768 } } } },
       },
     };
     expect(
       resolveEffectiveAgentModelSelection({ config: legacyConfig, sources: [] }),
     ).toMatchObject({
-      providerId: 'minimax',
-      modelId: 'MiniMax-M3',
-      contextWindow: 512_000,
+      providerId: 'kilo',
+      modelId: 'kilo-auto/free',
+      contextWindow: 256_000,
     });
     expect(legacyConfig.defaultModel).toBe('custom_provider:minimax-legacy/retired');
     expect(
@@ -165,49 +165,59 @@ describe('resolveAgentModelSelection', () => {
 });
 
 function registerM3TierSelectionTests(): void {
-  it.each(['minimax', 'minimax_api'])(
-    'separates official M3 tier from its maximum for %s',
-    (providerId) => {
-      const runtimeConfig: LocalConversationRuntimeConfig = {
-        ...config,
-        provider: {
-          minimax: {
-            models: {
-              'MiniMax-M3': {
-                limit: { context: 512_000, output: 128_000 },
-                contextWindowOptions: [512_000, 1_000_000],
-              },
+  it('separates the configured Kilo tier from its maximum for kilo', () => {
+    const runtimeConfig: LocalConversationRuntimeConfig = {
+      ...config,
+      provider: {
+        kilo: {
+          models: {
+            'MiniMax-M3': {
+              limit: { context: 512_000, output: 128_000 },
+              contextWindowOptions: [512_000, 1_000_000],
             },
           },
         },
-      };
-      const select = (contextWindow?: number, maxOutputTokens?: number) =>
-        resolveAgentModelSelection({
-          config: runtimeConfig,
-          sources: [
-            {
-              source: 'agent-config',
-              selection: { model: `${providerId}/MiniMax-M3`, contextWindow, maxOutputTokens },
-            },
-          ],
-        });
-      expect(select()).toMatchObject({ contextWindow: 512_000, diagnostics: [] });
-      expect(select(512_000)).toMatchObject({ contextWindow: 512_000, diagnostics: [] });
-      expect(select(1_000_000)).toMatchObject({ contextWindow: 1_000_000, diagnostics: [] });
-      if (providerId === 'minimax') {
-        expect(() => select(2_000_000, 256_000)).toThrow('Invalid model context_limit');
-        return;
-      }
-      expect(select(2_000_000, 256_000)).toMatchObject({
-        contextWindow: 1_000_000,
-        maxOutputTokens: 128_000,
-        diagnostics: [
-          expect.objectContaining({ code: 'context_window_clamped', physicalLimit: 1_000_000 }),
-          expect.objectContaining({ code: 'max_output_tokens_clamped', physicalLimit: 128_000 }),
+      },
+    };
+    const select = (contextWindow?: number, maxOutputTokens?: number) =>
+      resolveAgentModelSelection({
+        config: runtimeConfig,
+        sources: [
+          {
+            source: 'agent-config',
+            selection: { model: 'kilo/MiniMax-M3', contextWindow, maxOutputTokens },
+          },
         ],
       });
-    },
-  );
+    expect(select()).toMatchObject({ contextWindow: 512_000, diagnostics: [] });
+    expect(select(512_000)).toMatchObject({ contextWindow: 512_000, diagnostics: [] });
+    expect(select(1_000_000)).toMatchObject({ contextWindow: 1_000_000, diagnostics: [] });
+    // A tier the managed catalog does not publish fails closed instead of clamping.
+    expect(() => select(2_000_000, 256_000)).toThrow('Invalid model context_limit');
+  });
+
+  it('clamps a Kilo API-key request to the shipped catalog limit for kilo_api', () => {
+    const select = (contextWindow?: number, maxOutputTokens?: number) =>
+      resolveAgentModelSelection({
+        config,
+        sources: [
+          {
+            source: 'agent-config',
+            selection: { model: 'kilo_api/kilo-auto/free', contextWindow, maxOutputTokens },
+          },
+        ],
+      });
+    expect(select()).toMatchObject({ contextWindow: 256_000, diagnostics: [] });
+    expect(select(256_000)).toMatchObject({ contextWindow: 256_000, diagnostics: [] });
+    expect(select(2_000_000, 256_000)).toMatchObject({
+      contextWindow: 256_000,
+      maxOutputTokens: 32_768,
+      diagnostics: [
+        expect.objectContaining({ code: 'context_window_clamped', physicalLimit: 256_000 }),
+        expect.objectContaining({ code: 'max_output_tokens_clamped', physicalLimit: 32_768 }),
+      ],
+    });
+  });
 
   it.each(['other', 'custom_provider:other'])(
     'retains the declared context ceiling for same-name M3 on %s',
@@ -537,14 +547,14 @@ function registerCustomProviderPrefixFallbackTests(): void {
       }),
     ).toThrow('Model mafia/model');
     expect(() =>
-      selectFromAgentProfile('minimax/model', {
+      selectFromAgentProfile('kilo/model', {
         ...byokConfig,
         custom_provider: {
           ...byokConfig.custom_provider,
-          minimax: { models: { model: {} } },
+          kilo: { models: { model: {} } },
         },
       }),
-    ).toThrow('Model minimax/model');
+    ).toThrow('Model kilo/model');
 
     expect(() =>
       resolveAgentModelSelection({

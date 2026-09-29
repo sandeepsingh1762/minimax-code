@@ -4,6 +4,7 @@ import path from "node:path";
 import yaml from "js-yaml";
 import { classifyLLMErrorToCode } from "@mavis/agent-core/event-bridge";
 import {
+  KILO_PROVIDER_ID,
   allowsManagedMinimaxProviderOverride,
   getRuntimePresetKey,
   resolveLocalRuntimeAuthContextPath,
@@ -1166,7 +1167,7 @@ export function buildRuntimeDoctorSnapshot(input: {
     authMode: providerOptions?.authMode,
     baseURL: providerOptions?.baseURL,
     allowManagedBaseURLOverride:
-      providerId === "minimax" && allowsManagedMinimaxProviderOverride(),
+      providerId === KILO_PROVIDER_ID && allowsManagedMinimaxProviderOverride(),
   });
   const warnings = validateRuntimeConfigFile(configPath, input.config);
   const tokenPresent = Boolean(input.authContext?.accessToken?.trim());
@@ -1296,7 +1297,7 @@ function validateRuntimeConfigFile(
     const rawProviderIsObject =
       fileConfig.provider === undefined || isRecord(fileConfig.provider);
     if (
-      selection.providerId === "minimax" &&
+      selection.providerId === KILO_PROVIDER_ID &&
       effectiveAuthMode === "managed-login" &&
       rawProviderIsObject
     ) {
@@ -1308,7 +1309,7 @@ function validateRuntimeConfigFile(
             : {}),
           provider: {
             ...(isRecord(fileConfig.provider) ? fileConfig.provider : {}),
-            minimax: effectiveProvider,
+            [KILO_PROVIDER_ID]: effectiveProvider,
           } as LocalRuntimeConfig["provider"],
         },
         providerId: selection.providerId,

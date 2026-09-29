@@ -4,7 +4,7 @@ import { logger } from '@mavis/shared/local-runtime-logging';
 
 import type { AppDb } from '../../infra/db/client.js';
 import { agents } from '../../infra/db/schema/agents.js';
-import type { AgentSystemFactCallbacks } from './contracts.js';
+import type { AgentPromptMode, AgentSystemFactCallbacks } from './contracts.js';
 
 import { createAgentRuntimeOwner, type AgentRuntimeOwner } from './initialize.js';
 import { BuiltinAgentCatalog } from './builtin/catalog.js';
@@ -154,7 +154,8 @@ export interface AgentStorageLockScope {
 }
 
 export interface RuntimeAgentCompositionOptions {
-  readonly promptMode?: 'tui' | 'coding' | 'work';
+  /** Prompt family every built-in Agent renders from, including `pentest`. */
+  readonly promptMode?: AgentPromptMode;
   readonly promptVersion?: string;
   readonly db: AppDb;
   readonly dataDir: string;

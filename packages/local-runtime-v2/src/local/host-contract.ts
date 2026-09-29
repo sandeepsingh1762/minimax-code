@@ -12,6 +12,8 @@ import type {
 } from '../application/session/process-local-application-contract.js';
 
 export type { LocalRuntimeAuthContext, LocalRuntimeConfig } from '@mavis/local-runtime';
+import { AGENT_PROMPT_MODES, type AgentPromptMode } from '../service/agent/contracts.js';
+export { AGENT_PROMPT_MODES, type AgentPromptMode };
 
 /** Process-local DTO; runtime.ts checks compatibility with the DB-owned observation. */
 type DatabaseMigrationObservation = {
@@ -49,7 +51,7 @@ interface LocalRuntimeProductHostOptions extends V1LocalRuntimeProductHostOption
   getToolResultCompactionConfig?: () => ToolResultCompactionConfig | undefined;
   promptConfigKey?: Uint8Array;
   /** Selects a complete package-local mode template and freezes prompt assets for this process. */
-  promptMode?: 'tui' | 'coding' | 'work';
+  promptMode?: AgentPromptMode;
 }
 
 /** Runtime V2 host options after process-local compatibility wiring. */
@@ -65,7 +67,7 @@ interface CreateLocalRuntimeHostOptions extends V1CreateLocalRuntimeHostOptions 
   getToolResultCompactionConfig?: () => ToolResultCompactionConfig | undefined;
   promptConfigKey?: Uint8Array;
   /** Selects a complete package-local mode template and freezes prompt assets for this process. */
-  promptMode?: 'tui' | 'coding' | 'work';
+  promptMode?: AgentPromptMode;
 }
 
 /** Runtime V2 owner host with its process-local application facade. */

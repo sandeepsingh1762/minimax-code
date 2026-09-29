@@ -404,6 +404,12 @@ const COMMAND_SOURCES: readonly TuiCommandSource[] = [
     category: 'Runtime',
   },
   {
+    name: 'connect',
+    description: 'Set and use a Kilo / MiniMax API key',
+    category: 'Runtime',
+    argumentHint: '[api-key]',
+  },
+  {
     name: 'plugins',
     description: 'Browse, install, enable, and remove Plugins',
     category: 'Capability',

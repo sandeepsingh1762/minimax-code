@@ -112,18 +112,18 @@ describe('listLocalRuntimeModels', () => {
     ]);
   });
 
-  it('reports the resolved managed MiniMax API protocol without model-name inference', () => {
+  it('reports the resolved managed API-key protocol without model-name inference', () => {
     const entries = listLocalRuntimeModels(
       config({
         minimaxModelSource: 'minimax_api_key',
-        provider: { minimax: { models: { 'MiniMax-M3': {} } } },
+        provider: { kilo: { models: { 'kilo-auto/free': {} } } },
       }),
     );
 
     expect(entries).toContainEqual(
       expect.objectContaining({
-        providerId: 'minimax',
-        modelId: 'MiniMax-M3',
+        providerId: 'kilo',
+        modelId: 'kilo-auto/free',
         apiFormat: 'anthropic-messages',
       }),
     );

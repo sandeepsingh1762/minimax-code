@@ -261,12 +261,16 @@ export function createTuiProgram(options: CreateTuiProgramOptions): Command {
     .action((source: 'token_plan' | 'minimax_api_key') => runProvider({ action: 'use', source }));
 
   provider
-    .command('set-minimax-key')
-    .description('Save and use a MiniMax API key')
+    .command('set-key')
+    .alias('set-kilo-key')
+    .alias('set-minimax-key')
+    .description('Save and use a Kilo / MiniMax API key')
+    .argument('[key]', 'API key string')
     .option('--api-key-env <name>', 'environment variable containing the API key')
-    .action((commandOptions: { apiKeyEnv?: string }) =>
+    .action((keyArg: string | undefined, commandOptions: { apiKeyEnv?: string }) =>
       runProvider({
         action: 'set-minimax-key',
+        apiKey: keyArg,
         apiKeyEnv: commandOptions.apiKeyEnv,
       }),
     );

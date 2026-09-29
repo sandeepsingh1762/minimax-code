@@ -1,7 +1,14 @@
 import { randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import { dirname, join } from 'node:path';
-import { getConfig, getConfigPath, MINIMAX_API_MODEL_CATALOG, resetConfig } from '@mavis/config';
+import {
+  getConfig,
+  getConfigPath,
+  KILO_API_MODEL_CATALOG,
+  KILO_API_PROVIDER_ID,
+  KILO_PROVIDER_ID,
+  resetConfig,
+} from '@mavis/config';
 import yaml from 'js-yaml';
 import lockfile from 'proper-lockfile';
 
@@ -122,17 +129,17 @@ export async function compareAndSetLocalModelContext(
 ): Promise<LocalModelContextCompareAndSetResult> {
   const modelId = input.modelId.trim();
   if (
-    (input.providerId !== 'minimax' && input.providerId !== 'minimax_api') ||
+    (input.providerId !== KILO_PROVIDER_ID && input.providerId !== KILO_API_PROVIDER_ID) ||
     !modelId ||
     DANGEROUS_CONFIG_PATH_SEGMENTS.has(modelId)
   ) {
-    throw new LocalConfigValidationError('Invalid MiniMax model context target');
+    throw new LocalConfigValidationError('Invalid Kilo model context target');
   }
   if (
-    input.providerId === 'minimax_api' &&
-    !MINIMAX_API_MODEL_CATALOG[modelId]?.contextWindowOptions?.includes(input.contextLimit)
+    input.providerId === KILO_API_PROVIDER_ID &&
+    !KILO_API_MODEL_CATALOG[modelId]?.contextWindowOptions?.includes(input.contextLimit)
   ) {
-    throw new LocalConfigValidationError('Invalid MiniMax API context limit');
+    throw new LocalConfigValidationError('Invalid Kilo API context limit');
   }
   const configPath = getConfigPath();
   let release: (() => Promise<void>) | undefined;
@@ -148,8 +155,8 @@ export async function compareAndSetLocalModelContext(
     resetConfig();
     const currentConfig = getConfig() as LocalRuntimeConfig;
     const currentContext =
-      input.providerId === 'minimax'
-        ? currentConfig.provider?.minimax?.models?.[modelId]?.limit?.context
+      input.providerId === KILO_PROVIDER_ID
+        ? currentConfig.provider?.[KILO_PROVIDER_ID]?.models?.[modelId]?.limit?.context
         : currentMinimaxApiContext(currentConfig, modelId);
     if (currentContext !== input.expectedContextLimit) {
       return { updated: false, config: currentConfig };
@@ -157,7 +164,7 @@ export async function compareAndSetLocalModelContext(
     if (!(await beforeCommit(currentConfig))) {
       return { updated: false, config: currentConfig };
     }
-    if (input.providerId === 'minimax') {
+    if (input.providerId === KILO_PROVIDER_ID) {
       const modelContextLimits = isPlainRecord(raw.minimaxModelContextLimits)
         ? raw.minimaxModelContextLimits
         : {};
@@ -187,7 +194,7 @@ export async function compareAndSetLocalModelContext(
 }
 
 function currentMinimaxApiContext(config: LocalRuntimeConfig, modelId: string): number | undefined {
-  const model = MINIMAX_API_MODEL_CATALOG[modelId];
+  const model = KILO_API_MODEL_CATALOG[modelId];
   const override = config.minimax_api?.modelContextLimits?.[modelId];
   return override !== undefined && model?.contextWindowOptions?.includes(override)
     ? override

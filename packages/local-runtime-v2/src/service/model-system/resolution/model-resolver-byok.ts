@@ -1,5 +1,5 @@
 import type { Api } from '@earendil-works/pi-ai';
-import { MINIMAX_API_MODEL_CATALOG, getRuntimeRegion } from '@mavis/config';
+import { KILO_API_MODEL_CATALOG, KILO_GATEWAY_BASE_URL, KILO_GATEWAY_API_FORMAT, getRuntimeRegion } from '@mavis/config';
 
 import type {
   LocalByokProviderConfig,
@@ -11,8 +11,8 @@ import type {
 import { mergeProviderHeaders } from '../connectivity/provider-request.js';
 import {
   isModelProviderApi,
-  MANAGED_MINIMAX_PROVIDER_ID,
-  MINIMAX_API_PROVIDER_ID,
+  KILO_PROVIDER_ID,
+  KILO_API_PROVIDER_ID,
 } from '../identity.js';
 
 const BYOK_FALLBACK_MODEL_LIMITS = {
@@ -50,17 +50,26 @@ export function planMinimaxApiResolution(input: {
   if (!apiKey) {
     throw new Error('LocalModelResolver: minimax_api apiKey is not configured.');
   }
-  const catalogModel = MINIMAX_API_MODEL_CATALOG[input.modelId];
+  const catalogModel = KILO_API_MODEL_CATALOG[input.modelId];
   const contextOverride = config.modelContextLimits?.[input.modelId];
   const contextLimit =
     contextOverride !== undefined && catalogModel?.contextWindowOptions?.includes(contextOverride)
       ? contextOverride
       : catalogModel?.limit?.context;
+
+  const isKiloTokenOrModel =
+    apiKey.startsWith('eyJ') ||
+    input.modelId.includes('/') ||
+    input.modelId.startsWith('kilo');
+
+  const defaultBaseUrl = isKiloTokenOrModel ? KILO_GATEWAY_BASE_URL : defaultMinimaxApiBaseUrl();
+  const defaultApi = isKiloTokenOrModel ? (KILO_GATEWAY_API_FORMAT as Api) : 'anthropic-messages';
+
   return {
-    provider: MINIMAX_API_PROVIDER_ID,
-    api: 'anthropic-messages',
+    provider: KILO_API_PROVIDER_ID,
+    api: config.baseURL?.trim() ? (isKiloTokenOrModel ? (KILO_GATEWAY_API_FORMAT as Api) : 'anthropic-messages') : defaultApi,
     apiKey,
-    baseUrl: config.baseURL?.trim() || defaultMinimaxApiBaseUrl(),
+    baseUrl: config.baseURL?.trim() || defaultBaseUrl,
     contextWindow:
       contextLimit ??
       (input.catalog.fromCatalog
@@ -100,11 +109,23 @@ export function planCustomProviderResolution(input: {
 
 function resolveCustomProviderCredentials(
   config: LocalCustomProviderConfig,
-  input: { readonly provider: string; readonly providerKey: string },
+  input: { readonly provider: string; readonly providerKey: string; readonly byok?: LocalByokProviderConfig },
 ): Pick<ByokResolutionPlan, 'apiKey' | 'authProvider' | 'runtimeProvider' | 'baseUrl'> {
   const authProvider =
     config.kind === 'oauth' || config.options?.authMode === 'oauth' ? input.providerKey : undefined;
-  const apiKey = config.options?.apiKey?.trim();
+  let apiKey = config.options?.apiKey?.trim();
+  if (
+    !apiKey &&
+    (input.provider === 'kilo' ||
+      input.providerKey === 'kilo' ||
+      input.providerKey === 'kilo_api_key' ||
+      input.providerKey === 'minimax_api')
+  ) {
+    apiKey =
+      input.byok?.minimax_api?.apiKey?.trim() ||
+      process.env.KILO_API_KEY?.trim() ||
+      process.env.MCODE_PROVIDER_API_KEY?.trim();
+  }
   if (!apiKey && !authProvider) {
     throw new Error(`LocalModelResolver: api_key not configured for provider "${input.provider}".`);
   }
@@ -153,9 +174,9 @@ export function firstBuiltinModel(
   providerConfig: LocalModelsConfig | undefined,
 ): { readonly provider: string; readonly modelId: string } | undefined {
   const preferredModelId = Object.keys(
-    providerConfig?.[MANAGED_MINIMAX_PROVIDER_ID]?.models ?? {},
+    providerConfig?.[KILO_PROVIDER_ID]?.models ?? {},
   )[0];
-  if (preferredModelId) return { provider: MANAGED_MINIMAX_PROVIDER_ID, modelId: preferredModelId };
+  if (preferredModelId) return { provider: KILO_PROVIDER_ID, modelId: preferredModelId };
   return Object.entries(providerConfig ?? {}).flatMap(([provider, config]) => {
     const modelId = Object.keys(config.models ?? {})[0];
     return modelId ? [{ provider, modelId }] : [];

@@ -2,8 +2,8 @@ import { randomBytes } from 'node:crypto';
 
 import {
   CUSTOM_PROVIDER_ID_PREFIX,
-  MANAGED_MINIMAX_PROVIDER_ID,
-  MINIMAX_API_PROVIDER_ID,
+  KILO_PROVIDER_ID,
+  KILO_API_PROVIDER_ID,
   OPENAI_CODEX_PROVIDER_ID,
 } from '../identity.js';
 
@@ -12,8 +12,8 @@ import {
  * either reserved provider ids in model keys or config tree roots.
  */
 export const RESERVED_PROVIDER_KEYS: ReadonlySet<string> = new Set([
-  MANAGED_MINIMAX_PROVIDER_ID,
-  MINIMAX_API_PROVIDER_ID,
+  KILO_PROVIDER_ID,
+  KILO_API_PROVIDER_ID,
   OPENAI_CODEX_PROVIDER_ID,
   'provider',
   CUSTOM_PROVIDER_ID_PREFIX.slice(0, -1),

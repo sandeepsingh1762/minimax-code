@@ -1,5 +1,5 @@
 import type { GlobalEvent } from '@mavis/shared/global-events';
-import { isLegacyManagedMinimaxProvider } from '@mavis/config';
+import { KILO_PROVIDER_ID, isLegacyManagedMinimaxProvider } from '@mavis/config';
 
 import {
   annotateModelFavorites,
@@ -95,11 +95,11 @@ export function createProcessLocalApplication(
           const selected = (await options.modelProvider.application.list(input)).find(
             (model) => model.selected,
           );
-          if (selected?.providerId === 'minimax') {
+          if (selected?.providerId === KILO_PROVIDER_ID) {
             status = {
               ...status,
               selection: {
-                defaultModel: `minimax/${selected.modelId}`,
+                defaultModel: `${KILO_PROVIDER_ID}/${selected.modelId}`,
                 providerId: selected.providerId,
                 modelId: selected.modelId,
               },
@@ -110,7 +110,7 @@ export function createProcessLocalApplication(
             };
           }
         }
-        if (selectedProviderId(status) !== 'minimax') return status;
+        if (selectedProviderId(status) !== KILO_PROVIDER_ID) return status;
         const source = options.modelProvider.providers.getMinimaxModelSource();
         return {
           ...status,

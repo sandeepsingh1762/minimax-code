@@ -3,7 +3,7 @@ import { ThinkingLevel } from '@mavis/protocol';
 import { getRuntimePresetKey, resolveModelAvailability } from '@mavis/config';
 import {
   LocalModelProviderError,
-  MANAGED_MINIMAX_PROVIDER_ID,
+  KILO_PROVIDER_ID,
   formatModelKey,
   freezeManagedQueueModel,
   savedSessionModel,
@@ -215,7 +215,7 @@ function isManagedSelection(
   providerId: string,
 ): boolean {
   return (
-    providerId === MANAGED_MINIMAX_PROVIDER_ID && config.minimaxModelSource !== 'minimax_api_key'
+    providerId === KILO_PROVIDER_ID && config.minimaxModelSource !== 'minimax_api_key'
   );
 }
 

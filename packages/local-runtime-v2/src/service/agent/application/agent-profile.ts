@@ -23,16 +23,17 @@ import {
   normalizeRequestRef,
   parseExplicitNameOrStable,
 } from '../domain/names.js';
-import type {
-  AgentAvatarAsset,
-  AgentConfigurationSelection,
-  AgentExecutionProfile,
-  AgentProfileRequest,
-  AgentStoreMeta,
-  AgentStorePort,
-  AgentView,
-  BuiltinAgentDefinition,
-  FrozenAgentExecutionDefinition,
+import {
+  AGENT_PROMPT_MODES,
+  type AgentAvatarAsset,
+  type AgentConfigurationSelection,
+  type AgentExecutionProfile,
+  type AgentProfileRequest,
+  type AgentStoreMeta,
+  type AgentStorePort,
+  type AgentView,
+  type BuiltinAgentDefinition,
+  type FrozenAgentExecutionDefinition,
 } from '../contracts.js';
 import { AgentConfigError, type CanonicalAgentConfig } from '../storage/canonical-agent-config.js';
 import {
@@ -159,7 +160,9 @@ export function createAgentPromptSelection(
   options: Pick<AgentProfileRequest, 'promptMode' | 'promptVersion'>,
 ): (input: AgentProfileRequest) => AgentProfileRequest {
   const { promptMode, promptVersion } = options;
-  if (promptMode !== undefined && !['tui', 'coding', 'work'].includes(promptMode)) {
+  // AGENT_PROMPT_MODES is the single validated list, so widening the union in
+  // contracts.ts cannot leave this gate accepting a mode the catalog rejects.
+  if (promptMode !== undefined && !AGENT_PROMPT_MODES.includes(promptMode)) {
     throw new Error(`Invalid prompt mode: ${String(promptMode)}`);
   }
   return (input) => (promptMode === undefined ? input : { ...input, promptMode, promptVersion });

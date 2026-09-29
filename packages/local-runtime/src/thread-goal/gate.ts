@@ -183,7 +183,7 @@ export function isThreadGoalEnabled(configGetter?: () => ThreadGoalGateConfig): 
 export function threadGoalRepeatedReplyLimit(configGetter?: () => ThreadGoalGateConfig): number {
   const configured = configGetter?.().goal?.breaker?.repeatedReplyLimit;
   return typeof configured === 'number' && Number.isFinite(configured) && configured > 0
-    ? Math.floor(configured)
+    ? Math.min(Math.floor(configured), GOAL_CONFIG_LIMITS.breaker.repeatedReplyLimit)
     : GOAL_CONFIG_DEFAULTS.breaker.repeatedReplyLimit;
 }
 
@@ -195,9 +195,10 @@ export function threadGoalBudgetGraceSteps(configGetter?: () => ThreadGoalGateCo
 }
 
 export function threadGoalRepeatedNotMetLimit(configGetter?: () => ThreadGoalGateConfig): number {
-  return positiveIntegerOrDefault(
+  return boundedBreakerLimit(
     configGetter?.().goal?.verifier?.repeatedNotMetLimit,
     GOAL_CONFIG_DEFAULTS.verifier.repeatedNotMetLimit,
+    GOAL_CONFIG_LIMITS.verifier.repeatedNotMetLimit,
   );
 }
 
@@ -228,6 +229,23 @@ function positiveIntegerOrDefault(value: number | undefined, fallback: number): 
   return typeof value === 'number' && Number.isFinite(value) && value > 0
     ? Math.floor(value)
     : fallback;
+}
+
+/**
+ * Clamp a breaker threshold to its hard ceiling.
+ *
+ * A Goal is uncapped by budget on purpose, which makes these two breakers the
+ * loop's only stop. Reading the raw config here (rather than the parsed one)
+ * means the ceiling has to be enforced again at this boundary: without it a
+ * hand-written `repeatedNotMetLimit: 1e9` would be honoured and the verifier
+ * would never be able to stop a non-converging Goal.
+ */
+function boundedBreakerLimit(
+  value: number | undefined,
+  fallback: number,
+  max: number,
+): number {
+  return Math.min(positiveIntegerOrDefault(value, fallback), max);
 }
 
 function positiveIntegerOrNull(value: number | undefined): number | null {

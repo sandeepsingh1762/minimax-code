@@ -1,4 +1,4 @@
-import { getRuntimePresetKey, resolveModelAvailability } from '@mavis/config';
+import { KILO_PROVIDER_ID, getRuntimePresetKey, resolveModelAvailability } from '@mavis/config';
 import {
   hasConversationTaskModelSelection,
   type ConversationModelThinkingSelection,
@@ -177,7 +177,7 @@ function resolveCapturedModel(input: {
   const historical = input.historical ? historicalModelSelection(input.session) : undefined;
   const requested = input.input.requestedModel;
   if (
-    requested?.providerId === 'minimax' &&
+    requested?.providerId === KILO_PROVIDER_ID &&
     requested.modelId &&
     input.config.minimaxModelSource !== 'minimax_api_key'
   ) {
@@ -426,7 +426,7 @@ interface ModelSourcesInput {
 }
 
 function modelSources(input: ModelSourcesInput): readonly AgentModelSelectionSource[] {
-  if (input.requestedModel?.providerId === 'minimax' && input.requestedModel.modelId) {
+  if (input.requestedModel?.providerId === KILO_PROVIDER_ID && input.requestedModel.modelId) {
     const model = input.requestedModel;
     return [
       {

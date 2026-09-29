@@ -10,6 +10,7 @@ import type { LocalThreadGoalIntegrationDeps } from './host-deps.js';
 import { GoalLifecycle } from './lifecycle.js';
 import { GoalSettlement } from './settlement.js';
 import { SqliteThreadGoalStore } from './store.js';
+import type { GoalStopDiagnoses } from './stop-diagnosis.js';
 import { GoalTimeAccounting } from './time-accounting.js';
 import { GoalTurnContextRegistry } from './turn-context.js';
 
@@ -39,6 +40,8 @@ interface GoalCompositionInput {
   readonly isEnabled: () => boolean;
   readonly emitRuntimeEvent: (event: ThreadGoalRuntimeEvent) => void;
   readonly emitStateTransition: (from: ThreadGoalState['status'], goal: ThreadGoalState) => void;
+  /** Per-Goal memory of the last breaker pause, read by the stop announcement. */
+  readonly stopDiagnoses: GoalStopDiagnoses;
   readonly handleChanged: (event: ThreadGoalChangedEvent) => void;
   readonly handleTurnTimingFinished: LocalThreadGoalIntegrationDeps['turnTimingReader']['onFinished'] extends (
     listener: infer Listener,
@@ -86,6 +89,7 @@ export function composeGoalHostModules(input: GoalCompositionInput): GoalHostMod
     formatError: deps.formatError,
     armContinuationRearm: (goal) => continuation.armExplicitResetRearm(goal),
     drainContinuationRearm: (drainInput) => continuation.drainContinuationRearm(drainInput),
+    recordStopDiagnosis: (goalId, detail) => input.stopDiagnoses.record(goalId, detail),
   });
 
   continuation = new GoalContinuation({

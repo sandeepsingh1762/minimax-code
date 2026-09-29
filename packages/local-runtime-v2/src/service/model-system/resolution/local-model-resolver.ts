@@ -30,7 +30,7 @@ import type {
 import { normalizeProviderBaseUrl } from '../connectivity/provider-request.js';
 import {
   isModelProviderApi,
-  MANAGED_MINIMAX_PROVIDER_ID,
+  KILO_PROVIDER_ID,
   OPENAI_CODEX_PROVIDER_ID,
 } from '../identity.js';
 import { parseProviderId } from './model-key.js';
@@ -300,7 +300,7 @@ function selectExternalByokPlan(
       byok: options.byokConfigGetter?.(),
       providerConfig,
       modelId: identity.modelId,
-      catalog: lookupLocalModelLimits(MANAGED_MINIMAX_PROVIDER_ID, identity.modelId),
+      catalog: lookupLocalModelLimits(KILO_PROVIDER_ID, identity.modelId),
     });
   }
   return planCustomProviderResolution({
@@ -348,7 +348,7 @@ function selectMinimaxByok(
 ): SelectedModel {
   const byok = options.byokConfigGetter?.();
   if (
-    identity.provider !== MANAGED_MINIMAX_PROVIDER_ID ||
+    identity.provider !== KILO_PROVIDER_ID ||
     byok?.minimaxModelSource !== 'minimax_api_key'
   ) {
     return { identity };
@@ -357,7 +357,7 @@ function selectMinimaxByok(
     byok,
     providerConfig,
     modelId: identity.modelId,
-    catalog: lookupLocalModelLimits(MANAGED_MINIMAX_PROVIDER_ID, identity.modelId),
+    catalog: lookupLocalModelLimits(KILO_PROVIDER_ID, identity.modelId),
   });
   return byokPlan ? { identity, byokPlan, route: 'minimax_api_key' } : { identity };
 }
@@ -367,8 +367,17 @@ async function resolveProviderApiKey(
   configuredApiKey: string | undefined,
   options: LocalModelResolverOptions,
 ): Promise<string | undefined> {
-  if (provider !== OPENAI_CODEX_PROVIDER_ID) return configuredApiKey;
-  return (await options.providerAuthGetter?.(provider))?.trim();
+  if (provider === OPENAI_CODEX_PROVIDER_ID) {
+    return (await options.providerAuthGetter?.(provider))?.trim();
+  }
+  if (!configuredApiKey && (provider === 'kilo' || provider === KILO_PROVIDER_ID)) {
+    const byok = options.byokConfigGetter?.();
+    const fromByok = byok?.minimax_api?.apiKey?.trim();
+    if (fromByok) return fromByok;
+    const fromEnv = process.env.KILO_API_KEY?.trim() || process.env.MCODE_PROVIDER_API_KEY?.trim();
+    if (fromEnv) return fromEnv;
+  }
+  return configuredApiKey;
 }
 
 type ResolvedByokResolutionPlan = Omit<ByokResolutionPlan, 'apiKey' | 'authProvider'> & {
@@ -727,7 +736,7 @@ export function resolveLocalProviderCredentials(
   const token = authContext?.accessToken?.trim();
   const headers = resolveCredentialHeaders(optionHeaders, modelHeaders, token, auth.authMode);
   return {
-    apiKey: resolveCredentialApiKey(modelRef, options, auth.authMode),
+    apiKey: resolveCredentialApiKey(modelRef, options, auth.authMode, provider),
     baseUrl: resolveCredentialBaseUrl(configuredBaseUrl, auth.managedBaseURL),
     ...(headers ? { headers } : {}),
     ...(options ? { rawProviderOptions: options } : {}),
@@ -742,9 +751,14 @@ function resolveCredentialApiKey(
   modelRef: IModelRef,
   options: LocalProviderOptions | undefined,
   authMode: ProviderAuthMode,
+  provider?: string,
 ): string | undefined {
   const configured = modelRef.api_key?.trim() || options?.apiKey?.trim();
   if (configured) return configured;
+  if (provider === 'kilo' || provider === KILO_PROVIDER_ID) {
+    const fromEnv = process.env.KILO_API_KEY?.trim() || process.env.MCODE_PROVIDER_API_KEY?.trim();
+    if (fromEnv) return fromEnv;
+  }
   return authMode === 'managed-login' ? MANAGED_PROVIDER_API_KEY_PLACEHOLDER : undefined;
 }
 

@@ -1,10 +1,13 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { KILO_API_MODEL_CATALOG } from '@mavis/config';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type {
   LocalByokConfigDraft,
+  LocalModelConfig,
+  LocalProviderConfig,
   LocalRuntimeConfig,
   ModelConnectionTestResult,
   ModelConnectionTestTarget,
@@ -15,10 +18,29 @@ import { planCustomProviderResolution } from '../resolution/model-resolver-byok.
 import { LocalModelCache } from '../catalog/model-cache.js';
 import { MINIMAX_API_DEFAULT_BASE_URL, minimaxApiModels } from '../catalog/minimax-api.js';
 import { listLocalRuntimeModels } from '../catalog/catalog.js';
+import { KILO_PROVIDER_ID, KILO_API_PROVIDER_ID } from '../identity.js';
 import { LocalModelProviderError, LocalModelProviderService } from './service.js';
 
 const RAW_KEY = 'sk-user-minimax-key-12345678';
 const CUSTOM_KEY = 'sk-custom-key-abcdefgh';
+
+/**
+ * A real gateway model id and its published limits. Gateway model ids contain
+ * slashes, so the model key is `providerId/modelId` split on the FIRST slash.
+ */
+const KILO_MODEL_ID = 'kilo-auto/free';
+const KILO_MODEL_KEY = `${KILO_PROVIDER_ID}/${KILO_MODEL_ID}`;
+const KILO_CONTEXT_LIMIT = KILO_API_MODEL_CATALOG[KILO_MODEL_ID]?.limit?.context ?? 0;
+const KILO_OUTPUT_LIMIT = KILO_API_MODEL_CATALOG[KILO_MODEL_ID]?.limit?.output ?? 0;
+
+/** A `provider.kilo` entry carrying the shipped catalog, deep-copied per harness. */
+function kiloProviderFixture(models?: Record<string, LocalModelConfig>): LocalProviderConfig {
+  return {
+    // Kilo is a BYOK gateway: no managed login, and the key lives outside config.
+    options: { authMode: 'api-key' },
+    models: structuredClone(models ?? { [KILO_MODEL_ID]: KILO_API_MODEL_CATALOG[KILO_MODEL_ID] }),
+  };
+}
 
 let dataDir: string;
 
@@ -29,6 +51,8 @@ interface Harness {
   selectModel: ReturnType<typeof vi.fn>;
   testCalls: Array<{ key: string; target: ModelConnectionTestTarget }>;
   discoverCalls: ModelDiscoveryTarget[];
+  /** Every context compare-and-set the service opened, in order. */
+  contextWrites: string[];
   setTestResult(result: ModelConnectionTestResult): void;
   setTestHandler(
     handler: (key: string, target: ModelConnectionTestTarget) => Promise<ModelConnectionTestResult>,
@@ -69,6 +93,7 @@ function makeHarness(
   let nextRawCustomProviders: Record<string, unknown> | undefined;
   const testCalls: Array<{ key: string; target: ModelConnectionTestTarget }> = [];
   const discoverCalls: ModelDiscoveryTarget[] = [];
+  const contextWrites: string[] = [];
   let configUpdateTail = Promise.resolve();
   const selectModel = vi.fn(async (modelKey: string) => {
     config.defaultModel = modelKey;
@@ -124,9 +149,12 @@ function makeHarness(
       },
     },
     compareAndSetModelContext: (input, beforeCommit) => {
+      contextWrites.push(
+        `${input.providerId}/${input.modelId}:${input.expectedContextLimit}->${input.contextLimit}`,
+      );
       const update = configUpdateTail.then(async () => {
         const model =
-          input.providerId === 'minimax_api'
+          input.providerId === KILO_API_PROVIDER_ID
             ? minimaxApiModels(config)[input.modelId]
             : config.provider?.[input.providerId]?.models?.[input.modelId];
         if (model?.limit?.context !== input.expectedContextLimit) return false;
@@ -136,7 +164,7 @@ function makeHarness(
           configWriteError = undefined;
           throw error;
         }
-        if (input.providerId === 'minimax_api') {
+        if (input.providerId === KILO_API_PROVIDER_ID) {
           config.minimax_api = {
             ...(config.minimax_api ?? {}),
             modelContextLimits: {
@@ -167,6 +195,7 @@ function makeHarness(
     selectModel,
     testCalls,
     discoverCalls,
+    contextWrites,
     setTestResult: (result) => {
       testResult = result;
     },
@@ -220,7 +249,10 @@ describe('MiniMax api key', () => {
 
     const provider = await h.service.upsertMinimaxApiKey({ apiKey: RAW_KEY });
 
-    expect(provider.models.map((model) => model.modelId)).toContain('MiniMax-M3');
+    // The API-key source serves the built-in Kilo catalog, never the managed
+    // snapshot's models.
+    expect(provider.providerId).toBe('kilo_api');
+    expect(provider.models.map((model) => model.modelId)).toContain('kilo-auto/free');
     expect(provider.models.map((model) => model.modelId)).not.toContain('Remote-B');
   });
 
@@ -285,7 +317,7 @@ describe('MiniMax api key', () => {
       errorMessage: 'provider rejected the test request',
     });
     await h.service.upsertMinimaxApiKey({ apiKey: RAW_KEY });
-    await h.service.testProvider('minimax_api');
+    await h.service.testProvider('kilo_api');
 
     await expect(h.service.setMinimaxModelSource('minimax_api_key')).resolves.toBe(
       'minimax_api_key',
@@ -422,153 +454,242 @@ describe('MiniMax api key', () => {
   });
 });
 
-describe('MiniMax model context', () => {
-  it('updates a managed model using its current dynamic context options', async () => {
-    const h = makeHarness({
+/**
+ * The Kilo gateway publishes one fixed `limit.context` per free model and no
+ * `contextWindowOptions`, on the managed `kilo` tree and on the `kilo_api`
+ * catalog alike. A user-selectable context window is therefore not a capability
+ * this route has: the block below pins the fixed window that IS reported and the
+ * refusal that a tier request gets, rather than a fictional tier list.
+ */
+describe('Kilo model context', () => {
+  it('reports the published fixed context window on both halves and no tiers', () => {
+    const managed = makeHarness({
+      provider: { kilo: kiloProviderFixture() },
+      defaultModel: KILO_MODEL_KEY,
       minimaxModelSource: 'token_plan',
-      provider: {
-        minimax: {
-          models: {
-            'MiniMax-M4': {
-              name: 'MiniMax M4',
-              limit: { context: 256_000, output: 64_000 },
-              contextWindowOptions: [256_000, 768_000],
-            },
-          },
-        },
-      },
+    });
+    const byok = makeHarness({
+      provider: { kilo: kiloProviderFixture() },
+      defaultModel: KILO_MODEL_KEY,
+      minimaxModelSource: 'minimax_api_key',
+      minimax_api: { apiKey: RAW_KEY },
+    });
+
+    for (const h of [managed, byok]) {
+      const entry = h.service
+        .listEffectiveProviders()
+        .find((provider) => provider.providerId === KILO_PROVIDER_ID)
+        ?.models.find((model) => model.modelId === KILO_MODEL_ID);
+      expect(entry?.modelConfigId).toBe(KILO_MODEL_KEY);
+      expect(entry).toMatchObject({
+        contextLimit: KILO_CONTEXT_LIMIT,
+        defaultContextLimit: KILO_CONTEXT_LIMIT,
+        maxOutputTokens: KILO_OUTPUT_LIMIT,
+      });
+      // The absence is the contract: no published tiers means no picker.
+      expect(entry?.contextWindowOptions).toBeUndefined();
+      expect(h.config.provider?.[KILO_PROVIDER_ID]?.models?.[KILO_MODEL_ID]?.limit?.context).toBe(
+        KILO_CONTEXT_LIMIT,
+      );
+    }
+    expect(minimaxApiModels(byok.config)[KILO_MODEL_ID]?.limit?.context).toBe(KILO_CONTEXT_LIMIT);
+  });
+
+  it('refuses a tier update on the managed half and writes nothing', async () => {
+    const h = makeHarness({
+      provider: { kilo: kiloProviderFixture() },
+      defaultModel: KILO_MODEL_KEY,
+      minimaxModelSource: 'token_plan',
+    });
+    const before = structuredClone(h.config.provider?.[KILO_PROVIDER_ID]);
+
+    const error = await h.service
+      .updateMinimaxModelContext({
+        modelId: KILO_MODEL_ID,
+        contextLimit: 1_000_000,
+        expectedContextLimit: KILO_CONTEXT_LIMIT,
+      })
+      .then(
+        () => undefined,
+        (reason: unknown) => reason,
+      );
+
+    expect(error).toBeInstanceOf(LocalModelProviderError);
+    expect(error).toMatchObject({ status: 503, code: 'MODEL_CONTEXT_UNAVAILABLE' });
+    expect((error as Error).message).toBe(
+      `Kilo model "${KILO_MODEL_KEY}" has no selectable context window; the gateway ` +
+        `publishes a fixed ${KILO_CONTEXT_LIMIT} context window (requested 1000000)`,
+    );
+    expect(h.testCalls).toEqual([]);
+    expect(h.contextWrites).toEqual([]);
+    expect(h.config.provider?.[KILO_PROVIDER_ID]).toEqual(before);
+    expect(h.cache.load().model_status).toEqual({});
+    expect(h.cache.load().provider_status).toEqual({});
+  });
+
+  it('refuses the same tier update on the Kilo_api half with the identical error', async () => {
+    const h = makeHarness({
+      provider: { kilo: kiloProviderFixture() },
+      defaultModel: KILO_MODEL_KEY,
+      minimaxModelSource: 'minimax_api_key',
+      minimax_api: { apiKey: RAW_KEY },
+    });
+
+    const error = await h.service
+      .updateMinimaxModelContext({
+        modelId: KILO_MODEL_ID,
+        contextLimit: 1_000_000,
+        expectedContextLimit: KILO_CONTEXT_LIMIT,
+      })
+      .then(
+        () => undefined,
+        (reason: unknown) => reason,
+      );
+
+    expect(error).toMatchObject({ status: 503, code: 'MODEL_CONTEXT_UNAVAILABLE' });
+    expect((error as Error).message).toBe(
+      `Kilo model "${KILO_MODEL_KEY}" has no selectable context window; the gateway ` +
+        `publishes a fixed ${KILO_CONTEXT_LIMIT} context window (requested 1000000)`,
+    );
+    expect(h.testCalls).toEqual([]);
+    expect(h.contextWrites).toEqual([]);
+    expect(h.config.minimax_api?.modelContextLimits).toBeUndefined();
+    expect(h.cache.load().model_status).toEqual({});
+  });
+
+  it('ignores a stored Kilo_api context selection because no tiers are published', async () => {
+    const h = makeHarness({
+      provider: { kilo: kiloProviderFixture() },
+      defaultModel: KILO_MODEL_KEY,
+      minimaxModelSource: 'minimax_api_key',
+      minimax_api: { apiKey: RAW_KEY, modelContextLimits: { [KILO_MODEL_ID]: 1_000_000 } },
+    });
+
+    // The stored selection stays on disk but is not applied, so the reported
+    // window is the catalog's fixed one and the model stays selectable.
+    expect(h.config.minimax_api?.modelContextLimits).toEqual({ [KILO_MODEL_ID]: 1_000_000 });
+    expect(minimaxApiModels(h.config)[KILO_MODEL_ID]?.limit?.context).toBe(KILO_CONTEXT_LIMIT);
+    const entry = h.service
+      .listEffectiveProviders()
+      .find((provider) => provider.providerId === KILO_PROVIDER_ID)
+      ?.models.find((model) => model.modelId === KILO_MODEL_ID);
+    expect(entry?.contextLimit).toBe(KILO_CONTEXT_LIMIT);
+    expect(entry?.contextWindowOptions).toBeUndefined();
+    expect(() => h.service.assertModelSelectable(KILO_PROVIDER_ID, KILO_MODEL_ID)).not.toThrow();
+  });
+
+  it('rejects a context update for a model the Kilo catalog does not publish', async () => {
+    const h = makeHarness({
+      provider: { kilo: kiloProviderFixture() },
+      defaultModel: KILO_MODEL_KEY,
+      minimaxModelSource: 'minimax_api_key',
+      minimax_api: { apiKey: RAW_KEY },
+    });
+
+    for (const modelId of ['MiniMax-M3', 'kilo-auto/does-not-exist']) {
+      await expect(
+        h.service.updateMinimaxModelContext({
+          modelId,
+          contextLimit: 1_000_000,
+          expectedContextLimit: 512_000,
+        }),
+      ).rejects.toMatchObject({ status: 404, code: 'MODEL_NOT_FOUND' });
+    }
+    expect(h.testCalls).toEqual([]);
+    expect(h.contextWrites).toEqual([]);
+  });
+
+  it('rejects a malformed context selection before resolving a route', async () => {
+    const h = makeHarness({
+      provider: { kilo: kiloProviderFixture() },
+      defaultModel: KILO_MODEL_KEY,
+      minimaxModelSource: 'token_plan',
     });
 
     await expect(
       h.service.updateMinimaxModelContext({
-        modelId: 'MiniMax-M4',
-        contextLimit: 768_000,
-        expectedContextLimit: 256_000,
+        modelId: KILO_MODEL_ID,
+        contextLimit: 0,
+        expectedContextLimit: KILO_CONTEXT_LIMIT,
+      }),
+    ).rejects.toMatchObject({ status: 400, code: 'INVALID_CONTEXT_LIMIT' });
+    await expect(
+      h.service.updateMinimaxModelContext({
+        modelId: KILO_MODEL_ID,
+        contextLimit: KILO_CONTEXT_LIMIT,
+        expectedContextLimit: 0,
+      }),
+    ).rejects.toMatchObject({ status: 400, code: 'VALIDATION_ERROR' });
+    expect(h.contextWrites).toEqual([]);
+  });
+
+  it('applies a tier when the selected route publishes one', async () => {
+    // A hand-authored `contextWindowOptions` on the profile's own `provider.kilo`
+    // entry is the only way a Kilo model offers tiers; the managed half then
+    // commits it directly, with no connection test.
+    const h = makeHarness({
+      provider: {
+        kilo: kiloProviderFixture({
+          [KILO_MODEL_ID]: {
+            ...KILO_API_MODEL_CATALOG[KILO_MODEL_ID],
+            contextWindowOptions: [KILO_CONTEXT_LIMIT, 512_000],
+          },
+        }),
+      },
+      defaultModel: KILO_MODEL_KEY,
+      minimaxModelSource: 'token_plan',
+    });
+
+    await expect(
+      h.service.updateMinimaxModelContext({
+        modelId: KILO_MODEL_ID,
+        contextLimit: 512_000,
+        expectedContextLimit: KILO_CONTEXT_LIMIT,
       }),
     ).resolves.toEqual({ ok: true });
-    expect(h.config.provider.minimax?.models?.['MiniMax-M4']?.limit?.context).toBe(768_000);
+    expect(h.config.provider?.[KILO_PROVIDER_ID]?.models?.[KILO_MODEL_ID]?.limit?.context).toBe(
+      512_000,
+    );
+    expect(h.contextWrites).toEqual([`${KILO_MODEL_KEY}:${KILO_CONTEXT_LIMIT}->512000`]);
+    expect(h.testCalls).toEqual([]);
   });
 
-  it('tests a Paygo M3 context candidate before committing config and cache together', async () => {
+  it('rejects a tier the published list does not contain', async () => {
     const h = makeHarness({
-      minimax_api: { apiKey: RAW_KEY },
-      minimaxModelSource: 'minimax_api_key',
-    });
-    const m3 = h.config.provider.minimax?.models?.['MiniMax-M3'];
-    if (!m3) throw new Error('missing MiniMax-M3 fixture');
-    m3.limit = { ...m3.limit, context: 512_000 };
-
-    const outcome = await h.service.updateMinimaxModelContext({
-      modelId: 'MiniMax-M3',
-      contextLimit: 1_000_000,
-      expectedContextLimit: 512_000,
-    });
-
-    expect(outcome).toMatchObject({ ok: true, status: { state: 'available' } });
-    expect(h.testCalls).toHaveLength(1);
-    expect(h.testCalls[0]?.target).toMatchObject({
-      api: 'anthropic-messages',
-      apiKey: RAW_KEY,
-      modelId: 'MiniMax-M3',
-    });
-    expect(m3.limit?.context).toBe(512_000);
-    expect(h.config.minimax_api?.modelContextLimits).toEqual({ 'MiniMax-M3': 1_000_000 });
-    expect(minimaxApiModels(h.config)['MiniMax-M3']?.limit?.context).toBe(1_000_000);
-    h.config.provider.minimax = {
-      models: { 'Remote-Only-M4': { limit: { context: 256_000 } } },
-    };
-    expect(minimaxApiModels(h.config)['MiniMax-M3']?.limit?.context).toBe(1_000_000);
-    expect(() => h.service.assertModelSelectable('minimax', 'MiniMax-M3')).not.toThrow();
-  });
-
-  it('keeps the current Paygo M3 context and cache when its candidate test fails', async () => {
-    const h = makeHarness({
-      minimax_api: { apiKey: RAW_KEY },
-      minimaxModelSource: 'minimax_api_key',
-    });
-    const m3 = h.config.provider.minimax?.models?.['MiniMax-M3'];
-    if (!m3) throw new Error('missing MiniMax-M3 fixture');
-    m3.limit = { ...m3.limit, context: 512_000 };
-    h.setTestResult({ ok: false, errorCode: 'rejected', errorMessage: 'Rejected' });
-
-    await expect(
-      h.service.updateMinimaxModelContext({
-        modelId: 'MiniMax-M3',
-        contextLimit: 1_000_000,
-        expectedContextLimit: 512_000,
-      }),
-    ).resolves.toMatchObject({ ok: false, status: { state: 'failed' } });
-    expect(m3.limit?.context).toBe(512_000);
-    expect(h.cache.load().model_status['minimax_api/MiniMax-M3']).toBeUndefined();
-  });
-
-  it('ignores an unsupported stored BYOK context and rejects selecting it', async () => {
-    const h = makeHarness({
-      minimax_api: {
-        apiKey: RAW_KEY,
-        modelContextLimits: { 'MiniMax-M3': 768_000 },
+      provider: {
+        kilo: kiloProviderFixture({
+          [KILO_MODEL_ID]: {
+            ...KILO_API_MODEL_CATALOG[KILO_MODEL_ID],
+            contextWindowOptions: [KILO_CONTEXT_LIMIT, 512_000],
+          },
+        }),
       },
-      minimaxModelSource: 'minimax_api_key',
+      defaultModel: KILO_MODEL_KEY,
+      minimaxModelSource: 'token_plan',
     });
 
-    expect(minimaxApiModels(h.config)['MiniMax-M3']?.limit?.context).toBe(512_000);
     await expect(
       h.service.updateMinimaxModelContext({
-        modelId: 'MiniMax-M3',
-        contextLimit: 768_000,
-        expectedContextLimit: 512_000,
+        modelId: KILO_MODEL_ID,
+        contextLimit: 1_000_000,
+        expectedContextLimit: KILO_CONTEXT_LIMIT,
       }),
-    ).rejects.toMatchObject({ code: 'INVALID_CONTEXT_LIMIT', status: 400 });
-    expect(h.testCalls).toHaveLength(0);
+    ).rejects.toMatchObject({ status: 400, code: 'INVALID_CONTEXT_LIMIT' });
+    expect(h.contextWrites).toEqual([]);
+    expect(h.config.provider?.[KILO_PROVIDER_ID]?.models?.[KILO_MODEL_ID]?.limit?.context).toBe(
+      KILO_CONTEXT_LIMIT,
+    );
   });
 });
 
-describe('MiniMax model context transactions', () => {
-  it.each([
-    [
-      'source',
-      (h: Harness) => {
-        h.config.minimaxModelSource = 'token_plan';
-      },
-    ],
-    [
-      'api key',
-      (h: Harness) => {
-        h.config.minimax_api = { apiKey: 'sk-changed-key' };
-      },
-    ],
-  ])('rejects the M3 commit when the MiniMax %s changes during testing', async (_name, change) => {
+describe('Kilo model context transactions', () => {
+  it('serializes a refused context update behind an in-flight provider test', async () => {
     const h = makeHarness({
-      minimax_api: { apiKey: RAW_KEY },
+      provider: { kilo: kiloProviderFixture() },
+      defaultModel: KILO_MODEL_KEY,
       minimaxModelSource: 'minimax_api_key',
-    });
-    const m3 = h.config.provider.minimax?.models?.['MiniMax-M3'];
-    if (!m3) throw new Error('missing MiniMax-M3 fixture');
-    m3.limit = { ...m3.limit, context: 512_000 };
-    h.setTestHandler(async () => {
-      change(h);
-      return { ok: true };
-    });
-
-    await expect(
-      h.service.updateMinimaxModelContext({
-        modelId: 'MiniMax-M3',
-        contextLimit: 1_000_000,
-        expectedContextLimit: 512_000,
-      }),
-    ).rejects.toMatchObject({ code: 'CONFIG_CHANGED', status: 409 });
-    expect(m3.limit?.context).toBe(512_000);
-    expect(h.cache.load().model_status['minimax_api/MiniMax-M3']).toBeUndefined();
-  });
-
-  it('serializes an older MiniMax test ahead of an M3 context transaction', async () => {
-    const h = makeHarness({
       minimax_api: { apiKey: RAW_KEY },
-      minimaxModelSource: 'minimax_api_key',
     });
-    const m3 = h.config.provider.minimax?.models?.['MiniMax-M3'];
-    if (!m3) throw new Error('missing MiniMax-M3 fixture');
-    m3.limit = { ...m3.limit, context: 512_000 };
     let releaseFirst: (() => void) | undefined;
     const firstBlocked = new Promise<void>((resolve) => {
       releaseFirst = resolve;
@@ -587,80 +708,84 @@ describe('MiniMax model context transactions', () => {
       return { ok: true };
     });
 
-    const olderTest = h.service.testModel('minimax_api', 'MiniMax-M3');
+    const olderTest = h.service.testModel(KILO_API_PROVIDER_ID, KILO_MODEL_ID);
     await started;
     const contextUpdate = h.service.updateMinimaxModelContext({
-      modelId: 'MiniMax-M3',
+      modelId: KILO_MODEL_ID,
       contextLimit: 1_000_000,
-      expectedContextLimit: 512_000,
+      expectedContextLimit: KILO_CONTEXT_LIMIT,
     });
-    await Promise.resolve();
-    expect(calls).toBe(1);
-    releaseFirst?.();
-    await expect(Promise.all([olderTest, contextUpdate])).resolves.toMatchObject([
-      { ok: true },
-      { ok: true },
+    // The update shares the managed mutation queue, so it cannot settle while
+    // the older provider test still holds it.
+    const settledEarly = await Promise.race([
+      contextUpdate.then(
+        () => 'settled',
+        () => 'settled',
+      ),
+      Promise.resolve('queued'),
     ]);
+    expect(settledEarly).toBe('queued');
+    expect(calls).toBe(1);
 
-    expect(calls).toBe(3);
-    expect(m3.limit?.context).toBe(512_000);
-    expect(h.config.minimax_api?.modelContextLimits).toEqual({ 'MiniMax-M3': 1_000_000 });
-    expect(minimaxApiModels(h.config)['MiniMax-M3']?.limit?.context).toBe(1_000_000);
-    expect(() => h.service.assertModelSelectable('minimax', 'MiniMax-M3')).not.toThrow();
+    releaseFirst?.();
+    await expect(olderTest).resolves.toMatchObject({ ok: true });
+    await expect(contextUpdate).rejects.toMatchObject({
+      status: 503,
+      code: 'MODEL_CONTEXT_UNAVAILABLE',
+    });
+    expect(calls).toBe(1);
+    expect(h.config.minimax_api?.modelContextLimits).toBeUndefined();
   });
 
-  it('updates token-plan M3 context directly without a connection test', async () => {
-    const h = makeHarness({ minimaxModelSource: 'token_plan' });
-    const m3 = h.config.provider.minimax?.models?.['MiniMax-M3'];
-    if (!m3) throw new Error('missing MiniMax-M3 fixture');
-    m3.limit = { ...m3.limit, context: 512_000 };
-
-    await expect(
-      h.service.updateMinimaxModelContext({
-        modelId: 'MiniMax-M3',
-        contextLimit: 1_000_000,
-        expectedContextLimit: 512_000,
-      }),
-    ).resolves.toEqual({ ok: true });
-    expect(h.testCalls).toHaveLength(0);
-    expect(m3.limit?.context).toBe(1_000_000);
-  });
-
-  it('restores the cache state observed inside the M3 config transaction', async () => {
+  it('releases the mutation queue after a refused context update', async () => {
     const h = makeHarness({
-      minimax_api: { apiKey: RAW_KEY },
+      provider: { kilo: kiloProviderFixture() },
+      defaultModel: KILO_MODEL_KEY,
       minimaxModelSource: 'minimax_api_key',
+      minimax_api: { apiKey: RAW_KEY },
     });
-    const m3 = h.config.provider.minimax?.models?.['MiniMax-M3'];
-    if (!m3) throw new Error('missing MiniMax-M3 fixture');
-    m3.limit = { ...m3.limit, context: 512_000 };
-    await h.cache.setModelStatus('minimax_api/MiniMax-M3', {
-      state: 'available',
-      config_fingerprint: 'sha256:old',
-    });
-    h.setTestHandler(async () => {
-      await h.cache.setModelStatus('minimax_api/MiniMax-M3', {
-        state: 'failed',
-        last_error_code: 'intervening',
-        config_fingerprint: 'sha256:intervening',
-      });
-      return { ok: true };
-    });
-    h.failNextConfigWrite(new Error('config disk full'));
 
     await expect(
       h.service.updateMinimaxModelContext({
-        modelId: 'MiniMax-M3',
+        modelId: KILO_MODEL_ID,
         contextLimit: 1_000_000,
-        expectedContextLimit: 512_000,
+        expectedContextLimit: KILO_CONTEXT_LIMIT,
       }),
-    ).rejects.toThrow('config disk full');
-    expect(m3.limit?.context).toBe(512_000);
-    expect(h.cache.load().model_status['minimax_api/MiniMax-M3']).toMatchObject({
-      state: 'failed',
-      last_error_code: 'intervening',
-      config_fingerprint: 'sha256:intervening',
+    ).rejects.toMatchObject({ status: 503, code: 'MODEL_CONTEXT_UNAVAILABLE' });
+    // A refused mutation must not hold the queue: the next provider test runs.
+    await expect(h.service.testModel(KILO_API_PROVIDER_ID, KILO_MODEL_ID)).resolves.toMatchObject({
+      ok: true,
     });
+    expect(h.testCalls.map((call) => call.target.modelId)).toEqual([KILO_MODEL_ID]);
+  });
+
+  it('leaves a concurrent test verdict in place when a tier update is refused', async () => {
+    const h = makeHarness({
+      provider: { kilo: kiloProviderFixture() },
+      defaultModel: KILO_MODEL_KEY,
+      minimaxModelSource: 'minimax_api_key',
+      minimax_api: { apiKey: RAW_KEY },
+    });
+    await h.cache.setModelStatus(`${KILO_API_PROVIDER_ID}/${KILO_MODEL_ID}`, {
+      state: 'available',
+      config_fingerprint: 'sha256:verified',
+    });
+
+    await expect(
+      h.service.updateMinimaxModelContext({
+        modelId: KILO_MODEL_ID,
+        contextLimit: 1_000_000,
+        expectedContextLimit: KILO_CONTEXT_LIMIT,
+      }),
+    ).rejects.toMatchObject({ status: 503, code: 'MODEL_CONTEXT_UNAVAILABLE' });
+
+    expect(h.cache.load().model_status).toEqual({
+      [`${KILO_API_PROVIDER_ID}/${KILO_MODEL_ID}`]: {
+        state: 'available',
+        config_fingerprint: 'sha256:verified',
+      },
+    });
+    expect(h.contextWrites).toEqual([]);
   });
 });
 
@@ -673,7 +798,7 @@ describe('MiniMax api key response', () => {
     expect(provider.maskedApiKey).not.toBe(RAW_KEY);
     expect(provider).not.toHaveProperty('rawApiKey');
     expect(JSON.stringify(provider)).not.toContain(RAW_KEY);
-    expect(provider.providerId).toBe('minimax_api');
+    expect(provider.providerId).toBe('kilo_api');
     expect(provider.kind).toBe('minimax-api-key');
     expect(provider.source).toBe('minimax_api');
   });
@@ -744,13 +869,13 @@ describe('custom provider API key reveal', () => {
     );
   });
 
-  it('reads only the user MiniMax API key and never falls back to the managed provider key', () => {
+  it('reads only the user API key and never falls back to the managed provider key', () => {
     const { service, config } = makeHarness();
-    expect(() => service.revealModelProviderApiKey({ providerId: 'minimax_api' })).toThrow(
-      'MiniMax API key is not configured',
+    expect(() => service.revealModelProviderApiKey({ providerId: 'kilo_api' })).toThrow(
+      'Kilo API key is not configured',
     );
     config.minimax_api = { apiKey: CUSTOM_KEY };
-    expect(service.revealModelProviderApiKey({ providerId: 'minimax_api' })).toBe(CUSTOM_KEY);
+    expect(service.revealModelProviderApiKey({ providerId: 'kilo_api' })).toBe(CUSTOM_KEY);
     expect(JSON.stringify(service.getMinimaxApiKeyStatus())).not.toContain(CUSTOM_KEY);
   });
 
@@ -1195,7 +1320,7 @@ describe('custom provider candidate persistence', () => {
     expect(outcome.provider?.models).toEqual([]);
     expect(h.config.custom_provider?.work?.models).toEqual({});
     expect(h.testCalls).toEqual([]);
-    expect(h.config.defaultModel).toBe('minimax/MiniMax-M3');
+    expect(h.config.defaultModel).toBe('kilo/kilo-auto/free');
     expect(h.config.defaultModelVariant).toBeUndefined();
   });
 
@@ -2224,7 +2349,7 @@ describe('custom provider default model recovery', () => {
       models: [{ modelId: 'kept' }],
     });
 
-    expect(h.config.defaultModel).toBe('minimax/MiniMax-M3');
+    expect(h.config.defaultModel).toBe('kilo/kilo-auto/free');
     expect(h.config.defaultModelVariant).toBeUndefined();
   });
 });
@@ -2396,7 +2521,7 @@ describe('custom provider deletion', () => {
     await h.service.deleteUserProvider({ providerId: 'custom_provider:work' });
     expect(h.config.custom_provider?.work).toBeUndefined();
     expect(h.cache.load().provider_status['custom_provider:work']).toBeUndefined();
-    expect(h.config.defaultModel).toBe('minimax/MiniMax-M3');
+    expect(h.config.defaultModel).toBe('kilo/kilo-auto/free');
     expect(h.config.defaultModelVariant).toBeUndefined();
   });
 
@@ -2409,33 +2534,46 @@ describe('custom provider deletion', () => {
 });
 
 describe('provider listings', () => {
-  it('uses the active API catalog and context overrides in both model lists', () => {
+  it('uses the active API catalog in both model lists and drops an unknown entry', () => {
     const h = makeHarness({
       minimaxModelSource: 'minimax_api_key',
-      minimax_api: { apiKey: RAW_KEY, modelContextLimits: { 'MiniMax-M3': 1_000_000 } },
+      minimax_api: { apiKey: RAW_KEY, modelContextLimits: { [KILO_MODEL_ID]: 1_000_000 } },
       provider: {
-        minimax: {
-          options: { authMode: 'managed-login' },
-          models: {
-            'remote-only': { name: 'Remote Only' },
-            'MiniMax-M3': { limit: { context: 512_000, output: 128_000 } },
-          },
-        },
+        // The preset writes the whole catalog into `provider.kilo`, and one
+        // extra id stands in for a model the API catalog no longer serves.
+        kilo: kiloProviderFixture({
+          ...KILO_API_MODEL_CATALOG,
+          'remote-only': { name: 'Remote Only' },
+        }),
       },
     });
     const provider = h.service
       .listEffectiveProviders()
-      .find((item) => item.providerId === 'minimax');
-    const listed = listLocalRuntimeModels(h.config).filter((item) => item.providerId === 'minimax');
+      .find((item) => item.providerId === KILO_PROVIDER_ID);
+    const listed = listLocalRuntimeModels(h.config).filter(
+      (item) => item.providerId === KILO_PROVIDER_ID,
+    );
 
-    expect(provider?.models.map((model) => model.modelId)).toEqual(
-      listed.map((model) => model.modelId),
+    // Both sides must resolve the same route: every selectable model matches in
+    // order, and the provider view's disabled remainder is exactly the two audio
+    // previews the picker leaves out.
+    expect(listed.map((model) => model.modelId)).toEqual(
+      provider?.models.filter((model) => model.enabled).map((model) => model.modelId),
+    );
+    expect(provider?.models.filter((model) => !model.enabled).map((model) => model.modelId)).toEqual(
+      ['google/lyria-3-pro-preview', 'google/lyria-3-clip-preview'],
     );
     expect(provider?.models.some((model) => model.modelId === 'remote-only')).toBe(false);
-    expect(provider?.models.find((model) => model.modelId === 'MiniMax-M3')).toMatchObject({
-      contextLimit: 1_000_000,
-      contextWindowOptions: [512_000, 1_000_000],
+    expect(listed.some((model) => model.modelId === 'remote-only')).toBe(false);
+    const entry = provider?.models.find((model) => model.modelId === KILO_MODEL_ID);
+    // The stored context selection is not applied: the model publishes no tiers,
+    // so the fixed window is what both listings report.
+    expect(entry).toMatchObject({
+      contextLimit: KILO_CONTEXT_LIMIT,
+      defaultContextLimit: KILO_CONTEXT_LIMIT,
+      maxOutputTokens: KILO_OUTPUT_LIMIT,
     });
+    expect(entry?.contextWindowOptions).toBeUndefined();
   });
 
   it('lists builtin and custom providers, excludes disabled custom providers', async () => {
@@ -2604,22 +2742,25 @@ describe('connection tests', () => {
     });
   });
 
-  it('tests the minimax_api provider against the derived base url and models', async () => {
+  it('tests the kilo_api provider against the derived base url and models', async () => {
     const h = makeHarness();
     await h.service.upsertMinimaxApiKey({ apiKey: RAW_KEY });
-    await h.service.testProvider('minimax_api');
+    await h.service.testProvider('kilo_api');
     expect(h.testCalls[0]?.target).toMatchObject({
       api: 'anthropic-messages',
       baseUrl: MINIMAX_API_DEFAULT_BASE_URL,
       apiKey: RAW_KEY,
-      modelId: 'MiniMax-M3',
+      modelId: 'kilo-auto/free',
     });
-    expect(h.testCalls.map((call) => call.target.minimaxM3ThinkingMode)).toEqual(['on', 'off']);
+    // The gateway default is not an M3, so the provider probe runs once instead
+    // of fanning out over the binary Thinking switch.
+    expect(h.testCalls).toHaveLength(1);
+    expect(h.testCalls[0]?.target.minimaxM3ThinkingMode).toBeUndefined();
   });
 
   it('rejects testing providers without a key or unknown providers', async () => {
     const h = makeHarness();
-    await expect(h.service.testProvider('minimax_api')).rejects.toMatchObject({ status: 400 });
+    await expect(h.service.testProvider('kilo_api')).rejects.toMatchObject({ status: 400 });
     await expect(h.service.testProvider('custom_provider:nope')).rejects.toMatchObject({
       status: 404,
     });

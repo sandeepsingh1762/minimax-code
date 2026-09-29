@@ -1,4 +1,4 @@
-import { MINIMAX_API_MODEL_CATALOG, getRuntimeRegion } from '@mavis/config';
+import { KILO_API_MODEL_CATALOG, getRuntimeRegion } from '@mavis/config';
 
 import type { LocalModelConfig, LocalRuntimeConfig } from '../config/types.js';
 
@@ -16,7 +16,7 @@ export function minimaxApiBaseUrl(config: LocalRuntimeConfig): string {
 
 /** The API-key catalog is builtin; only user-owned context selections are overlaid. */
 export function minimaxApiModels(config: LocalRuntimeConfig): Record<string, LocalModelConfig> {
-  const catalog = MINIMAX_API_MODEL_CATALOG as Record<string, LocalModelConfig>;
+  const catalog = KILO_API_MODEL_CATALOG as Record<string, LocalModelConfig>;
   const overrides = config.minimax_api?.modelContextLimits;
   if (!overrides) return catalog;
   return Object.fromEntries(

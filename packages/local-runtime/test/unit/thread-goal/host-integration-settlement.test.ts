@@ -80,9 +80,10 @@ describe("LocalThreadGoalIntegration injected v2 Turn settlement", () => {
       sessionId: active.sessionId,
       turnId: "turn_int",
       message: expect.objectContaining({
-        content: expect.stringContaining(
-          "follow the goal contract from the kickoff context",
-        ),
+        // The hardened continuation contract: an uncapped goal whose turn ends
+        // is not a stopping point. This substring is the load-bearing clause
+        // for long-running autonomous operation.
+        content: expect.stringContaining("this turn ending is not a stopping point"),
         origin: expect.objectContaining({
           goalId: active.goalId,
           kind: "active",
@@ -224,7 +225,7 @@ describe("LocalThreadGoalIntegration injected v2 Turn settlement", () => {
       expectedEpoch: accounted.updatedAt,
       fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/u),
       toolActivity: "unknown",
-      limit: 3,
+      limit: 8,
       pauseReason: "paused(no_progress_after_completion_claim)",
     });
     expect(settleBoundTurn).toHaveBeenCalledWith({
@@ -819,7 +820,7 @@ describe("LocalThreadGoalIntegration injected v2 Turn settlement", () => {
       expectedEpoch: active.updatedAt,
       fingerprint: expect.stringMatching(/^[a-f0-9]{64}$/u),
       toolActivity: "unknown",
-      limit: 3,
+      limit: 8,
       pauseReason: "paused(no_progress_after_completion_claim)",
     });
     expect(emitBusEvent).toHaveBeenCalledWith({
@@ -847,9 +848,14 @@ describe("LocalThreadGoalIntegration injected v2 Turn settlement", () => {
     expect(enqueuePostTurnContinuation).not.toHaveBeenCalled();
   });
 
-  it("pauses after three consecutive tool-less main Turns even when every reply differs", async () => {
+  it("pauses after the configured run of tool-less main Turns even when every reply differs", async () => {
     // GOAL-11 second breaker condition: the replies are all distinct, so only
-    // the no-tool streak can stop this Goal.
+    // the no-tool streak can stop this Goal. The run length tracks the shipped
+    // `breaker.repeatedReplyLimit` default, which is deliberately higher than
+    // the old value of 3 so a long autonomous run is not killed by legitimately
+    // slow progress. The default itself is pinned in
+    // packages/agent-modules/goal/test/unit/thread-goal/autonomy-defaults.test.ts.
+    const breakerLimit = 8;
     let current = goal();
     const admitted = current;
     const observed: Array<{ toolActivity: string; limit: number }> = [];
@@ -889,7 +895,11 @@ describe("LocalThreadGoalIntegration injected v2 Turn settlement", () => {
     });
 
     const decisions = [];
-    for (const [index, reply] of ["reply A", "reply B", "reply C"].entries()) {
+    const toolLessReplies = Array.from(
+      { length: breakerLimit },
+      (_unused, index) => `reply ${String.fromCharCode(65 + index)}`,
+    );
+    for (const [index, reply] of toolLessReplies.entries()) {
       const turnId = `turn_no_tool_${index}`;
       await admitGoalTurn(integration, current, turnId);
       decisions.push(
@@ -905,14 +915,18 @@ describe("LocalThreadGoalIntegration injected v2 Turn settlement", () => {
       );
     }
 
-    expect(observed).toEqual([
-      { toolActivity: "absent", limit: 3 },
-      { toolActivity: "absent", limit: 3 },
-      { toolActivity: "absent", limit: 3 },
-    ]);
-    expect(decisions[0]).toMatchObject({ action: "continued" });
-    expect(decisions[1]).toMatchObject({ action: "continued" });
-    expect(decisions[2]).toMatchObject({
+    expect(observed).toEqual(
+      Array.from({ length: breakerLimit }, () => ({
+        toolActivity: "absent",
+        limit: breakerLimit,
+      })),
+    );
+    // Every turn before the last one is steered, not stopped: the run must be
+    // allowed to keep going right up to the threshold.
+    for (const decision of decisions.slice(0, breakerLimit - 1)) {
+      expect(decision).toMatchObject({ action: "continued" });
+    }
+    expect(decisions[breakerLimit - 1]).toMatchObject({
       stage: 8,
       action: "stopped",
       reason: "paused(no_progress)",
@@ -1099,7 +1113,7 @@ describe("LocalThreadGoalIntegration injected v2 Turn settlement", () => {
       // for repetition, only cleared of its no-tool streak.
       fingerprint: null,
       toolActivity: "used",
-      limit: 3,
+      limit: 8,
     });
   });
 

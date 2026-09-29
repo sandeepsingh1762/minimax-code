@@ -1,4 +1,4 @@
-import { cp, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -16,6 +16,8 @@ import {
   legacyNamesFor,
   resolveCanonicalCapabilities,
 } from "../../../../src/service/agent/builtin/catalog.js";
+import { createAgentPromptSelection } from "../../../../src/service/agent/application/agent-profile.js";
+import { AGENT_PROMPT_MODES } from "../../../../src/service/agent/contracts.js";
 import type {
   PromptFileReader,
   PromptReadContext,
@@ -39,6 +41,7 @@ function extractCitationSection(prompt: string): string {
 
 afterEach(async () => {
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
   await Promise.all(
     fixtureDirectories
       .splice(0)
@@ -864,7 +867,10 @@ describe("BuiltinAgentCatalog session surfaces", () => {
     expect(cli.corePrompt).toContain("# Core Judgment");
     expect(cli.persona).toBeUndefined();
     expect(cliZh.corePrompt).toContain(
-      "You help users with software engineering tasks.",
+      "You are an authorized",
+    );
+    expect(cliZh.corePrompt).toContain(
+      "offensive-security operator and security researcher",
     );
     expect(cliZh.corePrompt).not.toContain("You are Mavis");
     expect(cliZh.corePrompt).not.toContain("MiniMax As a Jarvis");
@@ -1368,6 +1374,53 @@ describe("shipped canonical SubAgent definitions", () => {
       expect(definition.capabilityOverride?.features?.webSearch).toBe(true);
     },
   );
+
+  it.each(["recon", "webapp", "infra", "mobile"])(
+    "loads the shipped offensive %s definition from the roster",
+    async (name) => {
+      const catalog = new BuiltinAgentCatalog();
+      const definition = await catalog.readDefinition(name);
+
+      expect(definition.name).toBe(name);
+      expect(definition.capabilityOverride?.tools?.length).toBeGreaterThan(0);
+      expect(definition.capabilityOverride?.features?.mavis).toBe(false);
+    },
+  );
+
+  it("registers every canonical role in builtin-agents.json", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const catalog = new BuiltinAgentCatalog();
+    const assetsDir = await catalog.resolveAssetsDir();
+    const roster = JSON.parse(
+      readFileSync(join(assetsDir, "builtin-agents.json"), "utf8"),
+    ) as string[];
+
+    expect(roster).toEqual(
+      expect.arrayContaining(["mavis", "explore", "worker", "verifier", "recon", "webapp", "infra", "mobile"]),
+    );
+  });
+
+  it("gives webapp the full offensive tool set and delegation", async () => {
+    const definition = await new BuiltinAgentCatalog().readDefinition("webapp");
+    const tools = definition.capabilityOverride?.tools ?? [];
+
+    for (const required of ["bash", "read", "write", "edit", "grep", "glob", "todowrite", "web_fetch"]) {
+      expect(tools).toContain(required);
+    }
+    expect(definition.capabilityOverride?.features?.delegation).toBe(true);
+    expect(definition.capabilityOverride?.features?.webSearch).toBe(true);
+  });
+
+  it("keeps recon read-only", async () => {
+    const definition = await new BuiltinAgentCatalog().readDefinition("recon");
+    const tools = definition.capabilityOverride?.tools ?? [];
+
+    expect(tools).not.toContain("write");
+    expect(tools).not.toContain("edit");
+    expect(tools).toContain("bash");
+    expect(tools).toContain("grep");
+  });
 });
 
 describe("BuiltinAgentCatalog prompt modes", () => {
@@ -1420,10 +1473,10 @@ describe("BuiltinAgentCatalog prompt modes", () => {
       "You are a coding agent running in the MiniMax Code terminal",
     );
     expect(rendered[1]?.corePrompt).toContain(
-      "You help users with software engineering tasks.",
+      "offensive-security operator and security researcher",
     );
     expect(rendered[2]?.corePrompt).toContain(
-      "You help users research, analyze information, and create professional deliverables.",
+      "offensive-security operator and security researcher",
     );
     expect(rendered[0]?.corePrompt).toContain("## Deliverable Files");
     expect(rendered[1]?.corePrompt).toContain("## Media Output");
@@ -1517,6 +1570,350 @@ describe('Bash prompt contract across product surfaces', () => {
       const text = [rendered.corePrompt, rendered.surfacePrompt].join('\n');
       expect(text).not.toContain('and yield to the same managed background process after 15s');
       expect(text).not.toContain('PowerShell syntax only');
+    },
+  );
+});
+
+describe('pentest prompt mode', () => {
+  const common = {
+    agentName: 'mavis',
+    surface: 'cli' as const,
+    promptProfile: 'tui' as const,
+    appMode: 'coding' as const,
+    locale: 'en',
+    promptChannel: 'online' as const,
+    memoryEnabled: false,
+    cronEnabled: false,
+  };
+  const capabilities = () => resolveAgentCapabilities();
+
+  it('is a declared prompt family, not a type-only widening', () => {
+    expect(AGENT_PROMPT_MODES).toEqual(['tui', 'coding', 'work', 'pentest']);
+    expect(AGENT_PROMPT_MODES).toContain('pentest');
+  });
+
+  it('is accepted by the profile prompt-selection gate and applied to the request', () => {
+    const select = createAgentPromptSelection({
+      promptMode: 'pentest',
+      promptVersion: '0.5.0',
+    });
+    expect(
+      select({
+        ...common,
+        promptMode: undefined,
+        exactOwnerName: 'mavis',
+      } as never),
+    ).toMatchObject({ promptMode: 'pentest', promptVersion: '0.5.0' });
+    expect(() =>
+      createAgentPromptSelection({ promptMode: 'nope' as never }),
+    ).toThrow('Invalid prompt mode: nope');
+  });
+
+  it('resolves its own complete template, distinct from every other family', async () => {
+    const catalog = new BuiltinAgentCatalog();
+    const rendered = await catalog.render({
+      ...common,
+      promptMode: 'pentest',
+      memoryEnabled: true,
+      capabilities: capabilities(),
+    });
+    const others = await Promise.all(
+      (['tui', 'coding', 'work'] as const).map(async (promptMode) =>
+        (await catalog.render({ ...common, promptMode, capabilities: capabilities() }))
+          .promptSnapshot?.template,
+      ),
+    );
+
+    expect(rendered.promptSnapshot?.mode).toBe('pentest');
+    expect(rendered.promptSnapshot?.template).not.toBeFalsy();
+    expect(others).not.toContain(rendered.promptSnapshot?.template);
+    expect(rendered.corePrompt).toContain(
+      'You are an autonomous offensive-security operator running in the terminal',
+    );
+    expect(rendered.corePrompt).toContain('# Operator Doctrine');
+    expect(rendered.corePrompt).toContain('## Methodology is derived, never hardcoded');
+    expect(rendered.corePrompt).toContain('pentest_findings');
+    expect(rendered.corePrompt).toContain('pentest_probe');
+    // The engagement family still honours the Memory gate instead of silently
+    // rendering an unconditional memory layer.
+    expect(rendered.corePrompt).toContain('# Memory');
+    await expect(
+      catalog.render({
+        ...common,
+        promptMode: 'pentest',
+        capabilities: capabilities(),
+      }),
+    ).resolves.toMatchObject({ corePrompt: expect.not.stringContaining('# Memory') });
+  });
+
+  it('is reachable by a host that sets the mode and by an engagement opt-in', async () => {
+    const catalog = new BuiltinAgentCatalog();
+    const opted = await catalog.render({ ...common, capabilities: capabilities() });
+    expect(opted.promptSnapshot?.mode).toBe('tui');
+
+    vi.stubEnv('MAVIS_AGENT_PROMPT_MODE', 'pentest');
+    const engaged = await catalog.render({ ...common, capabilities: capabilities() });
+    expect(engaged.promptSnapshot?.mode).toBe('pentest');
+    expect(engaged.corePrompt).toContain('# Operator Doctrine');
+
+    // An explicit request wins over the opt-in, so a saved Task is never
+    // silently re-rendered into a different family.
+    const explicit = await catalog.render({
+      ...common,
+      promptMode: 'work',
+      capabilities: capabilities(),
+    });
+    expect(explicit.promptSnapshot?.mode).toBe('work');
+    expect(explicit.corePrompt).not.toContain('# Operator Doctrine');
+  });
+
+  it('ignores a stale or unknown opt-in instead of failing Session start', async () => {
+    const catalog = new BuiltinAgentCatalog();
+    vi.stubEnv('MAVIS_AGENT_PROMPT_MODE', 'pentesting');
+    await expect(
+      catalog.render({ ...common, capabilities: capabilities() }),
+    ).resolves.toMatchObject({ promptSnapshot: { mode: 'tui' } });
+
+    vi.stubEnv('MAVIS_AGENT_PROMPT_MODE', '');
+    await expect(
+      catalog.render({ ...common, capabilities: capabilities() }),
+    ).resolves.toMatchObject({ promptSnapshot: { mode: 'tui' } });
+  });
+
+  it('replays a frozen pentest Task snapshot under the same family', async () => {
+    const catalog = new BuiltinAgentCatalog();
+    const rendered = await catalog.render({
+      ...common,
+      promptMode: 'pentest',
+      memoryEnabled: true,
+      capabilities: capabilities(),
+    });
+    const resumed = catalog.renderPromptSnapshot(
+      { ...common, promptMode: 'pentest', capabilities: capabilities() },
+      rendered.promptSnapshot!,
+    );
+    expect(resumed.mode).toBe('pentest');
+    expect(resumed.systemPrompt).toContain('# Operator Doctrine');
+  });
+
+  it('is delivered as a managed Desktop prompt that exists on disk', async () => {
+    const catalog = new BuiltinAgentCatalog();
+    const assetsDir = await catalog.resolveAssetsDir();
+    const registry = JSON.parse(
+      await readFile(join(assetsDir, 'managed-prompts.json'), 'utf8'),
+    ) as { desktop_agent: string[] };
+    const managed = registry.desktop_agent;
+
+    expect(managed).toContain('_v2/pentest/SYSTEM.md.hbs');
+    for (const entry of managed) {
+      expect(entry).not.toContain('\\');
+      await expect(stat(join(assetsDir, ...entry.split('/')))).resolves.toBeTruthy();
+    }
+  });
+});
+
+describe('offensive operator doctrine in the everyday prompt families', () => {
+  const families = [
+    { label: 'coding', promptMode: 'coding' as const, appMode: 'coding' as const },
+    { label: 'work', promptMode: 'work' as const, appMode: 'work' as const },
+    { label: 'tui', promptMode: 'tui' as const, appMode: 'coding' as const },
+  ];
+
+  it.each(families)(
+    'makes $label an adversarial, target-adaptive, evidence-bound operator',
+    async ({ promptMode, appMode }) => {
+      const catalog = new BuiltinAgentCatalog();
+      const { corePrompt } = await catalog.render({
+        agentName: 'mavis',
+        surface: 'interactive',
+        promptMode,
+        appMode,
+        locale: 'en',
+        promptChannel: 'online',
+        capabilities: resolveAgentCapabilities(),
+        memoryEnabled: false,
+        cronEnabled: false,
+      });
+
+      // Adversarial, hypothesis-driven, chain-seeking rather than checklist-seeking.
+      expect(corePrompt).toContain('## Adversarial Posture');
+      expect(corePrompt).toContain('attack hypotheses, not in checklists');
+      expect(corePrompt).toContain('Prefer depth over breadth');
+      expect(corePrompt).toContain(
+        'A version match is a lead, never a finding. Absence of a defence is not a finding either',
+      );
+      expect(corePrompt).toContain(
+        'The moment something lands, ask what it now grants that was previously unreachable',
+      );
+
+      // Non-hardcoded methodology is stated, not implied.
+      expect(corePrompt).toContain('## Methodology Is Derived, Never Hardcoded');
+      expect(corePrompt).toContain('There is no fixed scan list');
+      expect(corePrompt).toContain('Do not walk a canned OWASP checklist in order');
+      expect(corePrompt).toContain('Derive what applies');
+      expect(corePrompt).toContain('Invent your own techniques when the obvious ones fail');
+      expect(corePrompt).toContain(
+        'Never assume a vulnerability class is present because it is common for this technology',
+      );
+      expect(corePrompt).toContain('Prevalence is a reason to look, not evidence');
+      expect(corePrompt).toContain('treat the suggestion as a question, not a task');
+
+      // Evidence discipline, including the durable record and its recovery.
+      expect(corePrompt).toContain('## Evidence Discipline');
+      expect(corePrompt).toContain('## Findings Store');
+      expect(corePrompt).toContain('Record each finding with `pentest_findings`');
+      expect(corePrompt).toContain(
+        'Never re-report a finding you have already recorded',
+      );
+      expect(corePrompt).toContain(
+        'recover the attack surface first with `pentest_findings` using its `surface` operation',
+      );
+      expect(corePrompt).toContain('resumed or compacted session');
+      expect(corePrompt).toContain('`pentest_probe`');
+      expect(corePrompt).toContain(
+        'Rate severity by demonstrated impact in this environment',
+      );
+
+      // Authorization scope discipline.
+      expect(corePrompt).toContain('## Authorization Scope');
+      expect(corePrompt).toContain('The scope is the authorization; there is no other');
+      expect(corePrompt).toContain('Never widen scope on your own');
+      expect(corePrompt).toContain(
+        'Respect the permission system as the executable form of that scope',
+      );
+      expect(corePrompt).toContain(
+        'never run a destructive or denial-of-service capability',
+      );
+      expect(corePrompt).toContain('## Delegation');
+    },
+  );
+
+  it('keeps the Mavis persona aligned with the offensive operator role', async () => {
+    const catalog = new BuiltinAgentCatalog();
+    const assetsDir = await catalog.resolveAssetsDir();
+    const persona = await readFile(join(assetsDir, 'mavis', 'PERSONA.md'), 'utf8');
+
+    expect(persona).toContain('display_name: Mavis');
+    expect(persona).toContain('MiniMax Code');
+    expect(persona).toContain('authorized offensive-security operator');
+    expect(persona).toContain('falsifiable hypotheses');
+    expect(persona).toContain('rather than from a remembered checklist');
+    expect(persona).toContain('findings store');
+    expect(persona).not.toContain('You are Mavis');
+    expect(persona).not.toContain('Core Judgment');
+    expect(persona).not.toContain('customer service');
+    expect(persona).not.toContain('sense of humor');
+    expect(persona).not.toContain('being robotic');
+  });
+});
+
+describe('shipped offensive role prompts', () => {
+  const roles = ['recon', 'webapp', 'infra', 'mobile'] as const;
+  const assetsDir = resolve(
+    dirname(fileURLToPath(import.meta.url)),
+    '../../../../assets/agents',
+  );
+
+  it.each(roles)(
+    'teaches %s a target-adaptive method and the findings-store discipline in V1 and V2',
+    async (role) => {
+      const [v1, v2] = await Promise.all([
+        readFile(join(assetsDir, role, 'system-prompt.md.hbs'), 'utf8'),
+        readFile(join(assetsDir, '_v2', `${role}.md.hbs`), 'utf8'),
+      ]);
+
+      for (const raw of [v1, v2]) {
+        // Prompt prose is hard-wrapped, so compare on normalized whitespace.
+        const prompt = raw.replace(/\s+/gu, ' ');
+        expect(prompt).toContain('pentest_findings');
+        expect(prompt).toContain('pentest_probe');
+        expect(prompt).toContain('`surface` operation');
+        expect(prompt).toMatch(
+          /Never (?:report|re-report) (?:a weakness|an element) you have already recorded/iu,
+        );
+        expect(prompt).toMatch(
+          /There is no (?:attack list|scan list|host checklist|mobile checklist|canonical enumeration order)|You do not get a scan list/iu,
+        );
+        expect(prompt).toMatch(
+          /Never (?:propose a weakness class|assume an? (?:weakness |vulnerability )?class)/iu,
+        );
+        expect(prompt).toMatch(/Prevalence is a reason to look, not evidence/iu);
+      }
+    },
+  );
+
+  it.each(roles)('renders the shipped V2 %s template under strict Handlebars', async (role) => {
+    const catalog = new BuiltinAgentCatalog();
+    const definition = await catalog.readDefinition(role);
+    const rendered = await catalog.render({
+      agentName: role,
+      surface: 'task-child',
+      promptMode: 'coding',
+      appMode: 'coding',
+      locale: 'en',
+      promptChannel: 'online',
+      capabilities: resolveCanonicalCapabilities(undefined, definition.capabilityOverride),
+    });
+
+    expect(rendered.assetAgentName).toBe(role);
+    expect(rendered.corePrompt).toContain(`# Role:`);
+    expect(rendered.corePrompt).toContain('pentest_findings');
+  });
+
+  it('keeps each offensive role method distinct rather than a shared template', async () => {
+    const [recon, webapp, infra, mobile] = await Promise.all(
+      roles.map((role) => readFile(join(assetsDir, '_v2', `${role}.md.hbs`), 'utf8')),
+    );
+    const prompts = { recon, webapp, infra, mobile };
+
+    for (const [name, prompt] of Object.entries(prompts)) {
+      for (const [other, otherPrompt] of Object.entries(prompts)) {
+        if (name === other) continue;
+        expect(prompt).not.toBe(otherPrompt);
+      }
+    }
+    expect(recon).toContain('# Findings Ledger');
+    expect(webapp).toContain('# Findings Ledger');
+    expect(infra).toContain('# Findings Ledger');
+    expect(mobile).toContain('# Findings Ledger');
+    // Each role's own vocabulary still drives its method.
+    expect(recon).toContain('attack surface');
+    expect(webapp).toContain('WSTG');
+    expect(infra).toContain('MITRE ATT&CK');
+    expect(mobile).toContain('MASTG');
+  });
+
+  it('grants recon the engagement tools while keeping it read-only', async () => {
+    const tools = (await new BuiltinAgentCatalog().readDefinition('recon'))
+      .capabilityOverride?.tools;
+
+    expect(tools).toContain('pentest_probe');
+    expect(tools).toContain('pentest_findings');
+    expect(tools).toContain('bash');
+    expect(tools).not.toContain('write');
+    expect(tools).not.toContain('edit');
+    expect(tools).not.toContain('todowrite');
+    expect(tools).not.toContain('task');
+  });
+
+  it.each(['webapp', 'infra', 'mobile'] as const)(
+    'declares the write, delegation and engagement ceiling %s actually receives',
+    async (role) => {
+      const definition = await new BuiltinAgentCatalog().readDefinition(role);
+      const tools = definition.capabilityOverride?.tools ?? [];
+
+      for (const granted of [
+        'bash',
+        'read',
+        'write',
+        'todowrite',
+        'pentest_probe',
+        'pentest_findings',
+      ]) {
+        expect(tools).toContain(granted);
+      }
+      expect(definition.capabilityOverride?.features?.delegation).toBe(true);
+      expect(definition.capabilityOverride?.features?.mavis).toBe(false);
     },
   );
 });

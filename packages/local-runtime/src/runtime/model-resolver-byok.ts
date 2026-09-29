@@ -4,7 +4,7 @@
 // tree path. Custom providers never consult the Pi catalog by name; missing
 // limits use the dedicated BYOK fallbacks (not the legacy 2048 default).
 import type { Api } from '@earendil-works/pi-ai';
-import { MINIMAX_API_MODEL_CATALOG } from '@mavis/config';
+import { KILO_API_MODEL_CATALOG, KILO_GATEWAY_BASE_URL, KILO_GATEWAY_API_FORMAT } from '@mavis/config';
 
 import type {
   LocalCustomProvidersConfig,
@@ -77,19 +77,29 @@ export function planMinimaxApiResolution(input: {
   if (!apiKey) {
     throw new Error('LocalModelResolver: minimax_api apiKey is not configured.');
   }
-  const catalogModel = MINIMAX_API_MODEL_CATALOG[input.modelId];
+  const catalogModel = KILO_API_MODEL_CATALOG[input.modelId];
   const contextOverride = cfg.modelContextLimits?.[input.modelId];
   const contextLimit =
     contextOverride !== undefined && catalogModel?.contextWindowOptions?.includes(contextOverride)
       ? contextOverride
       : catalogModel?.limit?.context;
+  const isKiloTokenOrModel =
+    apiKey.startsWith('eyJ') ||
+    input.modelId.includes('/') ||
+    input.modelId.startsWith('kilo');
+
+  const defaultBaseUrl = isKiloTokenOrModel ? KILO_GATEWAY_BASE_URL : MINIMAX_API_DEFAULT_BASE_URL;
+  const defaultApi = isKiloTokenOrModel ? (KILO_GATEWAY_API_FORMAT as Api) : 'anthropic-messages';
+  const effectiveApi = cfg.baseURL?.trim() ? (isKiloTokenOrModel ? (KILO_GATEWAY_API_FORMAT as Api) : 'anthropic-messages') : defaultApi;
+  const effectiveBaseUrl = cfg.baseURL?.trim() || defaultBaseUrl;
+
   return {
     provider: 'minimax_api',
-    api: 'anthropic-messages',
+    api: effectiveApi,
     apiKey,
     baseUrl: normalizeProviderBaseUrl(
-      'anthropic-messages',
-      cfg.baseURL?.trim() || MINIMAX_API_DEFAULT_BASE_URL,
+      effectiveApi as ModelProviderApi,
+      effectiveBaseUrl,
     ),
     contextWindow:
       contextLimit ??

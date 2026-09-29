@@ -25,7 +25,7 @@ export type McodeProviderCliRequest =
       readonly modelId?: string;
       readonly json?: boolean;
     }
-  | { readonly action: 'set-minimax-key'; readonly apiKeyEnv?: string }
+  | { readonly action: 'set-minimax-key'; readonly apiKey?: string; readonly apiKeyEnv?: string }
   | { readonly action: 'use'; readonly source: 'token_plan' | 'minimax_api_key' };
 
 interface McodeProviderCommandContext {
@@ -139,13 +139,20 @@ export async function runMcodeProviderCommand(
           });
     }
     if (request.action === 'set-minimax-key') {
-      const envName = request.apiKeyEnv?.trim() || 'MCODE_PROVIDER_API_KEY';
-      const apiKey = (options.environment ?? process.env)[envName]?.trim();
+      const envName = request.apiKeyEnv?.trim() || 'KILO_API_KEY';
+      const env = options.environment ?? process.env;
+      const apiKey =
+        request.apiKey?.trim() ||
+        env[envName]?.trim() ||
+        env['KILO_API_KEY']?.trim() ||
+        env['MCODE_PROVIDER_API_KEY']?.trim();
       if (!apiKey) {
-        throw new Error(`MiniMax API key is missing. Set ${envName} or pass --api-key-env <name>.`);
+        throw new Error(
+          `API key is missing. Pass key as argument, set ${envName} / MCODE_PROVIDER_API_KEY, or pass --api-key-env <name>.`,
+        );
       }
       await context.application.setMiniMaxApiKey(apiKey);
-      return 'MiniMax API Key saved and selected.';
+      return 'Kilo / MiniMax API Key saved and selected.';
     }
     await context.application.setMiniMaxSource(request.source);
     return request.source === 'token_plan' ? 'Using MiniMax Token Plan.' : 'Using MiniMax API Key.';

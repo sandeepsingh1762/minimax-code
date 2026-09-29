@@ -10,6 +10,7 @@ import type { GlobalEventPublisher } from '../events/global-events.js';
 import type { ThreadGoalTurnAdmissionPreparation } from './admission.js';
 import type { ThreadGoalRuntimeEventSink } from './events.js';
 import { threadGoalRepeatedReplyLimit, type ThreadGoalGateConfig } from './gate.js';
+import type { GoalStopBreakerDetail } from './stop-diagnosis.js';
 import { publishThreadGoalEvent } from './wiring.js';
 
 export type NoProgressBreakerDecision =
@@ -36,6 +37,12 @@ interface GoalBreakerDeps {
     readonly sessionId: string;
     readonly turnId: string;
   }) => Promise<void>;
+  /**
+   * Hand the pause's cause and counters to whoever announces the stop, so
+   * `goal.stopped` is self-contained instead of needing the adjacent
+   * `goal.breaker_decided` record to be correlated by hand.
+   */
+  readonly recordStopDiagnosis: (goalId: string, detail: GoalStopBreakerDetail) => void;
 }
 
 /** Owns repeated-reply breaker mutation and explicit-user reset semantics. */
@@ -112,6 +119,21 @@ export class GoalBreaker {
     this.emitDecision(result.goal, result.action, toolActivity, result.cause);
     if (result.action !== 'pause') return { action: 'continue', goal: result.goal };
 
+    /*
+     * Record before the transition is announced: the announcement is what emits
+     * `goal.stopped`, and it reads this entry to attach the cause. Without it an
+     * operator sees `paused(no_progress)` with no way to tell an identical-reply
+     * stall from a tool-less turn, both of which share that reason with the
+     * verifier's convergence stop.
+     */
+    this.deps.recordStopDiagnosis(result.goal.goalId, {
+      cause: result.cause ?? 'repeated_reply',
+      limit: threadGoalRepeatedReplyLimit(this.deps.configGetter),
+      repeatedReplyStreak: result.goal.noProgressStreak,
+      noToolStreak: result.goal.noToolStreak,
+      toolActivity,
+      overrodeCompletionClaim: completionClaimed,
+    });
     this.deps.emitStateTransition(goal.status, result.goal);
     publishThreadGoalEvent(this.deps.publishGlobalEvent, { type: 'updated', goal: result.goal });
     return { action: 'stop', reason: result.goal.statusReason ?? 'breaker_stopped' };

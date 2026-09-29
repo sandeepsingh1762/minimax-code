@@ -199,6 +199,10 @@
     "./memory-limits": {
       "types": "./src/memory-limits.ts",
       "import": "./dist/memory-limits.js"
+    },
+    "./findings-limits": {
+      "types": "./src/findings-limits.ts",
+      "import": "./dist/findings-limits.js"
     }
   },
   "types": "./src/index.ts",

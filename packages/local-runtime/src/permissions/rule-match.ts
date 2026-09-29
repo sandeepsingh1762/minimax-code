@@ -80,7 +80,13 @@ function permissionInputAction(toolName: string): LocalPermissionAction | undefi
     return 'read';
   }
   if (toolName === 'write' || toolName === 'edit' || toolName === 'apply_patch') return 'write';
-  if (toolName === 'web_fetch' || toolName === 'web_search') return 'network';
+  // `pentest_probe` opens a connection to a caller-supplied target from this
+  // device, exactly like web_fetch, so `actions: ['network']` rules must be able
+  // to name it. Without this it falls through as undefined and no path matcher
+  // carrying an `actions` list can ever match it.
+  if (toolName === 'web_fetch' || toolName === 'web_search' || toolName === 'pentest_probe') {
+    return 'network';
+  }
   return undefined;
 }
 

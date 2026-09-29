@@ -10,6 +10,8 @@ import { LocalGrepTool } from './local-grep.js';
 import { LocalSkillTool } from './local-skill.js';
 import { LocalMavisTool } from './local-mavis.js';
 import { LocalMemoryTool } from './local-memory.js';
+import { LocalPentestProbeTool } from './local-pentest-probe.js';
+import { LocalPentestFindingsTool } from './local-pentest-findings.js';
 import { LocalCodeReviewTool } from './local-code-review.js';
 import {
   LocalTaskOutputTool,
@@ -35,6 +37,8 @@ import type {
   LocalWebSearchAdapter,
   LocalWebsiteDeployAdapter,
   LocalMemoryAdapter,
+  LocalPentestProbeAdapter,
+  LocalPentestFindingsAdapter,
   LocalCodeReviewAdapter,
   LocalMavisAgentAdapter,
   LocalMavisCronAdapter,
@@ -63,6 +67,8 @@ export * from './local-mavis.js';
 export * from './local-mavis-commands.js';
 export * from './local-mavis-cron-adapter.js';
 export * from './local-memory.js';
+export * from './local-pentest-probe.js';
+export * from './local-pentest-findings.js';
 export * from './local-code-review.js';
 export * from './local-task-control.js';
 export * from './local-task.js';
@@ -112,6 +118,8 @@ export interface LocalToolRegistryDeps {
   taskControlAdapter?: LocalTaskControlAdapter;
   websiteDeployAdapter?: LocalWebsiteDeployAdapter;
   memoryAdapter?: LocalMemoryAdapter;
+  pentestProbeAdapter?: LocalPentestProbeAdapter;
+  pentestFindingsAdapter?: LocalPentestFindingsAdapter;
   codeReviewAdapter?: LocalCodeReviewAdapter;
   mavisAgentAdapter?: LocalMavisAgentAdapter;
   mavisCronAdapter?: LocalMavisCronAdapter;
@@ -145,6 +153,14 @@ export function buildLocalToolRegistry(deps: LocalToolRegistryDeps): Map<string,
   }
   if (deps.codeReviewAdapter) {
     tools.push(toRuntimeTool(new LocalCodeReviewTool(deps.codeReviewAdapter)));
+  }
+  // Both pentest tools stay host-owned: an embedded surface that supplies no
+  // adapter must not acquire network reach or a writable ledger by accident.
+  if (deps.pentestProbeAdapter) {
+    tools.push(toRuntimeTool(new LocalPentestProbeTool(deps.pentestProbeAdapter)));
+  }
+  if (deps.pentestFindingsAdapter) {
+    tools.push(toRuntimeTool(new LocalPentestFindingsTool(deps.pentestFindingsAdapter)));
   }
   if (deps.mavisAgentAdapter) {
     tools.push(

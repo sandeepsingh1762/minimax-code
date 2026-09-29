@@ -648,6 +648,34 @@ function buildWindowsPathSafetyDenyReason(input: LocalPermissionCheckerInput): s
   return undefined;
 }
 
+/**
+ * Name the target a `pentest_probe` call is about to reach, so the approval
+ * prompt says what is being contacted instead of a generic sentence. The
+ * payload is nested under the transport key (`http` / `tcp` / `dns` / `tls`),
+ * which is why this cannot reuse `permissionInputTarget`.
+ */
+function describePentestProbeTarget(input: Record<string, unknown>): string {
+  const readString = (value: unknown): string | undefined => {
+    if (typeof value !== 'string') return undefined;
+    const trimmed = value.trim();
+    return trimmed ? trimmed : undefined;
+  };
+  const http = input.http as Record<string, unknown> | undefined;
+  if (http && typeof http === 'object') {
+    const url = readString(http.url);
+    if (url) return url;
+  }
+  for (const key of ['tcp', 'tls', 'dns']) {
+    const payload = input[key] as Record<string, unknown> | undefined;
+    if (!payload || typeof payload !== 'object') continue;
+    const host = readString(payload.host);
+    if (!host) continue;
+    const port = typeof payload.port === 'number' ? `:${payload.port}` : '';
+    return `${host}${port}`;
+  }
+  return 'an unspecified target';
+}
+
 function normalizeWindowsPath(value: string): string {
   const normalized = canonicalizeWindowsAbsolutePath(value)
     .trim()
@@ -761,12 +789,24 @@ export function buildLocalPolicyDenyReason(
   toolName: string,
   input: Record<string, unknown>,
 ): string | undefined {
-  if (toolName === 'web_fetch' || toolName === 'website_deploy') {
+  if (toolName === 'web_fetch' || toolName === 'website_deploy' || toolName === 'pentest_probe') {
     if (toolName === 'web_fetch') {
       const url = typeof input.url === 'string' ? input.url.trim() : '';
       return (
         `Local permission check requires approval: web_fetch will request ` +
         `${url || 'a URL'} from this device's local network context.`
+      );
+    }
+    if (toolName === 'pentest_probe') {
+      // A brand-new tool with no registered checker is auto-ALLOWED
+      // (permission-core: an unregistered checker means allow-by-default), which
+      // is not acceptable for a tool that opens a connection to a user-supplied
+      // target. A policy deny here is demoted to an ask by the facade, so the
+      // first probe in a session asks the user and a persisted allow rule is
+      // still honoured afterwards.
+      return (
+        `Local permission check requires approval: pentest_probe will send an active request to ` +
+        `${describePentestProbeTarget(input)} from this device's local network context.`
       );
     }
     return (

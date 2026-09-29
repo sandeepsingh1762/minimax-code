@@ -6,6 +6,7 @@ import type {
   ResolvedAgentCapabilities,
 } from '@mavis/config';
 import type { PromptReadScope } from '@mavis/agent-runtime';
+import type { CanonicalSubagentRole } from '@mavis/agent-tools/desktop/subagent-roles';
 
 import type {
   AgentConfigError,
@@ -17,7 +18,27 @@ import type { PromptReadContext } from '../prompt-config/index.js';
 export type AgentCreationSource = 'manual' | 'auto' | 'builtin';
 export type AgentPromptSurface = 'interactive' | 'task-child' | 'cli';
 export type AgentPromptProfile = 'desktop' | 'tui';
-export type AgentPromptMode = 'tui' | 'coding' | 'work';
+
+/**
+ * Prompt families a built-in Agent can be rendered from. `tui`, `coding` and
+ * `work` are the everyday families; `pentest` is the authorized
+ * offensive-security engagement family.
+ *
+ * `pentest` is selected by the Session, not derived from the product `appMode`
+ * (`appMode` stays `coding` | `work` so the V1 mode-asset layout is unchanged).
+ * It is reachable two ways, both resolved in `builtin/catalog.ts`:
+ *
+ * 1. Explicitly, by the host: `createAgentRuntimeOwner({ promptMode: 'pentest' })`
+ *    or any `AgentProfileRequest.promptMode: 'pentest'`. The value is validated
+ *    against `AGENT_PROMPT_MODES` by `createAgentPromptSelection`, so a saved
+ *    Task can only be replayed under the mode it was frozen with.
+ * 2. By engagement opt-in, for a host that has no prompt-mode surface of its
+ *    own: `resolvePromptMode` falls back to `MAVIS_AGENT_PROMPT_MODE` when the
+ *    request carries no explicit mode. This is what lets a Desktop session
+ *    reach the engagement prompt without a new product flag.
+ */
+export const AGENT_PROMPT_MODES = ['tui', 'coding', 'work', 'pentest'] as const;
+export type AgentPromptMode = (typeof AGENT_PROMPT_MODES)[number];
 
 /** Agent-owned material; Runtime context and tool inventories remain separate. */
 export interface AgentPromptSnapshot {
@@ -35,7 +56,8 @@ export type AgentNameResolutionSource =
   | 'canonical_name'
   | 'explicit_agent';
 export type AgentNameCompatIntent = 'read' | 'write' | 'exact' | 'execution';
-export type AgentNameCompatCanonicalClass = 'explore' | 'worker' | 'verifier' | 'mavis' | 'other';
+/** Derived from the canonical role table so a new role is never classed `other`. */
+export type AgentNameCompatCanonicalClass = CanonicalSubagentRole | 'mavis' | 'other';
 export type AgentNameCompatMemberCountBucket = '1' | '2' | '3+';
 export type AgentNameCompatErrorCode =
   | 'UNKNOWN_AGENT_NAME'

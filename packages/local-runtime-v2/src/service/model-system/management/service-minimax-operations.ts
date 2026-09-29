@@ -1,5 +1,5 @@
 import { maskSecret } from '../secret.js';
-import { MANAGED_MINIMAX_PROVIDER_ID, MINIMAX_API_PROVIDER_ID } from '../identity.js';
+import { KILO_PROVIDER_ID, KILO_API_PROVIDER_ID } from '../identity.js';
 import type { LocalModelConfig, ModelContextUpdateOutcome } from '../contracts.js';
 import {
   cacheStatusView,
@@ -41,14 +41,14 @@ export function getMinimaxApiKeyStatus(context: ModelProviderServiceContext): {
   const apiKey = context.deps.configGetter().minimax_api?.apiKey?.trim();
   if (!apiKey) return { hasApiKey: false };
   const cache = context.deps.cache.load();
-  const target = context.resolveTestTarget(MINIMAX_API_PROVIDER_ID, undefined);
+  const target = context.resolveTestTarget(KILO_API_PROVIDER_ID, undefined);
   return {
     hasApiKey: true,
     maskedApiKey: maskSecret(apiKey),
     cachedStatus: cacheStatusView(
       modelCacheStatusFor(
         cache,
-        MINIMAX_API_PROVIDER_ID,
+        KILO_API_PROVIDER_ID,
         target.target.modelId,
         target.fingerprint,
       ),
@@ -67,7 +67,7 @@ export async function setMinimaxModelSource(
   source: 'token_plan' | 'minimax_api_key',
 ): Promise<string> {
   if (source !== 'token_plan' && source !== 'minimax_api_key') {
-    throw new LocalModelProviderError(400, 'Invalid MiniMax model source', 'VALIDATION_ERROR');
+    throw new LocalModelProviderError(400, 'Invalid Kilo model source', 'VALIDATION_ERROR');
   }
   let blocked: LocalModelProviderError | undefined;
   await context.deps.updateByokConfig((draft, currentConfig) => {
@@ -122,15 +122,23 @@ function prepareMinimaxContextUpdate(
   const source = baselineConfig.minimaxModelSource ?? 'token_plan';
   const currentModel =
     source === 'token_plan'
-      ? baselineConfig.provider?.minimax?.models?.[modelId]
+      // The write half of this flow targets KILO_PROVIDER_ID, so the read half
+      // must too. Reading the retired `minimax` key made every managed-context
+      // update fail with a 404 on any profile that was not upgraded in place.
+      ? baselineConfig.provider?.[KILO_PROVIDER_ID]?.models?.[modelId]
       : minimaxApiModels(baselineConfig)[modelId];
   if (!currentModel) {
     throw new LocalModelProviderError(404, 'Model not found', 'MODEL_NOT_FOUND');
   }
-  if (!currentModel.contextWindowOptions?.includes(input.contextLimit)) {
+  const contextWindowOptions = requireSelectableContextTiers(
+    currentModel,
+    modelId,
+    input.contextLimit,
+  );
+  if (!contextWindowOptions.includes(input.contextLimit)) {
     throw new LocalModelProviderError(
       400,
-      'Invalid MiniMax model context selection',
+      'Invalid Kilo model context selection',
       'INVALID_CONTEXT_LIMIT',
     );
   }
@@ -151,7 +159,7 @@ function requireMinimaxContextSelection(input: MinimaxContextUpdateInput): strin
   if (!modelId || !Number.isSafeInteger(input.contextLimit) || input.contextLimit <= 0) {
     throw new LocalModelProviderError(
       400,
-      'Invalid MiniMax model context selection',
+      'Invalid Kilo model context selection',
       'INVALID_CONTEXT_LIMIT',
     );
   }
@@ -163,6 +171,33 @@ function requireMinimaxContextSelection(input: MinimaxContextUpdateInput): strin
     );
   }
   return modelId;
+}
+
+/**
+ * Refuse a context-tier update for a model that publishes no tiers.
+ *
+ * The Kilo free catalog ships one fixed `limit.context` per model and no
+ * `contextWindowOptions`, on the managed `kilo` tree and on the `kilo_api`
+ * catalog alike. A selectable context window is therefore a capability the
+ * gateway does not have: writing a tier would persist a value the route ignores,
+ * and advertising synthetic tiers would promise a server capability that does not
+ * exist. Both halves resolve their model through this one guard, so the managed
+ * and BYOK routes refuse identically instead of diverging.
+ */
+function requireSelectableContextTiers(
+  model: LocalModelConfig,
+  modelId: string,
+  requestedContextLimit: number,
+): readonly number[] {
+  const options = model.contextWindowOptions;
+  if (Array.isArray(options) && options.length > 0) return options;
+  throw new LocalModelProviderError(
+    503,
+    `Kilo model "${KILO_PROVIDER_ID}/${modelId}" has no selectable context window; ` +
+      `the gateway publishes a fixed ${model.limit?.context ?? 0} context window ` +
+      `(requested ${requestedContextLimit})`,
+    'MODEL_CONTEXT_UNAVAILABLE',
+  );
 }
 
 async function updateTokenPlanModelContext(
@@ -188,7 +223,7 @@ async function updateMinimaxApiModelContext(
     ...prepared.currentModel,
     limit: { ...prepared.currentModel.limit, context: input.contextLimit },
   };
-  const target = context.resolveTestTarget(MINIMAX_API_PROVIDER_ID, prepared.modelId, {
+  const target = context.resolveTestTarget(KILO_API_PROVIDER_ID, prepared.modelId, {
     minimaxModelOverride: candidateModel,
   });
   const result = await context.deps.tester.test(
@@ -245,7 +280,7 @@ function minimaxContextUpdateSelection(
   contextLimit: number;
 } {
   return {
-    providerId: source === 'token_plan' ? MANAGED_MINIMAX_PROVIDER_ID : MINIMAX_API_PROVIDER_ID,
+    providerId: source === 'token_plan' ? KILO_PROVIDER_ID : KILO_API_PROVIDER_ID,
     modelId,
     expectedContextLimit: input.expectedContextLimit,
     contextLimit: input.contextLimit,

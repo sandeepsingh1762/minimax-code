@@ -30,9 +30,9 @@ describe("createProcessLocalApplication account and usage", () => {
         application: {
           list: async () => [
             {
-              providerId: "minimax",
-              modelId: "MiniMax-M3",
-              providerKind: "minimax-managed",
+              providerId: "kilo",
+              modelId: "kilo-auto/free",
+              providerKind: "minimax-api-key",
               selected: true,
             },
           ],
@@ -45,8 +45,8 @@ describe("createProcessLocalApplication account and usage", () => {
     await expect(
       application.account?.getStatus({ sessionId: "old-session" }),
     ).resolves.toMatchObject({
-      selection: { providerId: "minimax", modelId: "MiniMax-M3" },
-      provider: { id: "minimax", authMode: "managed-login" },
+      selection: { providerId: "kilo", modelId: "kilo-auto/free" },
+      provider: { id: "kilo", authMode: "api-key" },
       modelSource: "token-plan",
       auth: { tokenPresent: false },
     });
@@ -85,10 +85,10 @@ describe("createProcessLocalApplication account and usage", () => {
     expect(unsubscribe).toHaveBeenCalledOnce();
   });
 
-  it("reports the builtin MiniMax API-key route as BYOK account access", async () => {
+  it("reports the builtin Kilo API-key route as BYOK account access", async () => {
     const getStatus = vi.fn(async () => ({
-      selection: { providerId: "minimax", modelId: "MiniMax-M3" },
-      provider: { id: "minimax", authMode: "managed-login" },
+      selection: { providerId: "kilo", modelId: "kilo-auto/free" },
+      provider: { id: "kilo", authMode: "api-key" },
       auth: { tokenPresent: false },
     }));
     const getMinimaxModelSource = vi.fn(() => "minimax_api_key" as const);
@@ -110,8 +110,8 @@ describe("createProcessLocalApplication account and usage", () => {
     await expect(
       application.account?.getStatus({ sessionId: "session-1" }),
     ).resolves.toMatchObject({
-      selection: { providerId: "minimax", modelId: "MiniMax-M3" },
-      provider: { id: "minimax", authMode: "managed-login" },
+      selection: { providerId: "kilo", modelId: "kilo-auto/free" },
+      provider: { id: "kilo", authMode: "api-key" },
       auth: { tokenPresent: false },
       modelSource: "byok",
     });

@@ -18,6 +18,7 @@ import type {
 } from '@mavis/goal';
 
 import { logger } from '../common/logger.js';
+import type { GoalStopCause, GoalStopRecovery } from './stop-diagnosis.js';
 
 export type ThreadGoalChangedEvent =
   | {
@@ -169,6 +170,50 @@ export interface ThreadGoalRuntimeEventPayloadMap {
     from: ThreadGoalStatus;
     to: ThreadGoalStatus;
     reason: ThreadGoalStatusReason;
+  };
+  /**
+   * The single record of *why an autonomous run ended*, emitted from the one
+   * transition choke point whenever a Goal leaves `active`.
+   *
+   * `goal.state_transitioned` is the durable fact; this adds what only the host
+   * knows — the coarse classification, whether any budget was even capped, the
+   * effective breaker thresholds, the counters behind the stop, and how the loop
+   * can be started again. See `stop-diagnosis.ts`.
+   */
+  'goal.stopped': {
+    goalId: string;
+    sessionId: string;
+    from: ThreadGoalStatus;
+    to: ThreadGoalStatus;
+    reason: ThreadGoalStatusReason;
+    classification: GoalStopCause;
+    recovery: GoalStopRecovery;
+    budgetsCapped: {
+      token: boolean;
+      mainTurn: boolean;
+      activeTime: boolean;
+    };
+    limits: {
+      repeatedReplyLimit: number;
+      repeatedNotMetLimit: number;
+      graceSteps: number;
+      tokenBudget: number | null;
+      mainTurns: number | null;
+      activeSeconds: number | null;
+    };
+    usage: {
+      tokensUsed: number;
+      turnsUsed: number;
+      activeSeconds: number;
+    };
+    breaker?: {
+      cause: 'repeated_reply' | 'no_tool';
+      limit: number;
+      repeatedReplyStreak: number;
+      noToolStreak: number;
+      toolActivity: 'used' | 'absent' | 'unknown';
+      overrodeCompletionClaim: boolean;
+    };
   };
   'goal.continuation_submitted': {
     goalId: string;

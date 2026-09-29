@@ -6,6 +6,8 @@ import type {
   LocalMavisCronAdapter,
   LocalMavisSessionAdapter,
   LocalCodeReviewAdapter,
+  LocalPentestFindingsAdapter,
+  LocalPentestProbeAdapter,
   LocalSandboxBashExecutionPort,
 } from '@mavis/agent-tools/desktop';
 import { buildLocalTurnToolSources, type LocalTurnToolSources } from './local-native-tools.js';
@@ -14,6 +16,7 @@ import { buildLocalTaskAppendAdapter } from './local-task-append.js';
 import { shouldEnableLocalTaskTool } from './local-task-tool-policy.js';
 // Type-only import: erased at runtime, so it introduces no import cycle with host.ts.
 import type { LocalRuntimeApiHost } from './host.js';
+import type { LocalFindingFacade } from '../pentest/local-finding-facade.js';
 import type { DesktopTurnCapabilityView } from '../runtime/desktop-turn-capabilities.js';
 
 export type BuildOwnerTurnToolSourcesInput = {
@@ -41,6 +44,23 @@ export type BuildOwnerTurnToolSourcesInput = {
   cronEnabled?: boolean;
   desktopCapabilities?: DesktopTurnCapabilityView;
   codeReviewAdapter?: LocalCodeReviewAdapter;
+  /**
+   * Pentest capabilities for this Turn. All optional and all opt-in: a host that
+   * supplies none of these gets neither pentest tool. `pentestProbeEnabled` must
+   * be true before `pentest_probe` is assembled at all — the client is created
+   * here but the tool is not, so an unconfigured surface never gains network
+   * reach through this path.
+   */
+  findingFacade?: LocalFindingFacade;
+  pentestProbeEnabled?: boolean;
+  /**
+   * Authorized targets from `pentest.scope`, enforced inside the probe client
+   * before any packet is sent. Empty or absent means the permission system is
+   * the only boundary.
+   */
+  pentestScope?: readonly string[];
+  pentestProbeAdapter?: LocalPentestProbeAdapter;
+  pentestFindingsAdapter?: LocalPentestFindingsAdapter;
   disabledBuiltinSkillNames?: readonly AgentBuiltinSkillId[];
   resumeCodexAvailable?: boolean;
   sandboxOperationsFactory?: LocalSandboxBashExecutionPort;
@@ -93,6 +113,17 @@ export async function buildLocalTurnToolSourcesForHost(
     taskAppendAdapter: buildLocalTaskAppendAdapter(input.host),
     taskControlAdapter: input.host.backgroundTaskService,
     memoryFacade: input.host.memoryFacade,
+    ...(input.findingFacade ? { findingFacade: input.findingFacade } : {}),
+    ...(input.pentestProbeEnabled === undefined
+      ? {}
+      : { pentestProbeEnabled: input.pentestProbeEnabled }),
+    ...(input.pentestScope && input.pentestScope.length > 0
+      ? { pentestScope: input.pentestScope }
+      : {}),
+    ...(input.pentestProbeAdapter ? { pentestProbeAdapter: input.pentestProbeAdapter } : {}),
+    ...(input.pentestFindingsAdapter
+      ? { pentestFindingsAdapter: input.pentestFindingsAdapter }
+      : {}),
     memoryEnabled: input.memoryEnabled ?? runtimeConfig.memory?.enabled !== false,
     memoryReadEnabled: input.memoryReadEnabled,
     memoryWriteEnabled: input.memoryWriteEnabled,
