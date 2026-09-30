@@ -977,7 +977,23 @@ async function initializeRuntimeTurnSystem(
           createGoalBudgetToolPolicyGuard(),
         ),
         outputTokenCap: goalVerifierOutputTokenCap,
-        resolveLlmRetry: () => ({ observer: llmRetryObserver }),
+        resolveLlmRetry: (turnInput) => ({
+          observer: llmRetryObserver,
+          // BYOK free-tier models (e.g. kilo-auto/free) can take 30-60 s per
+          // attempt before timing out. The default 120 s elapsed window is
+          // exhausted after 2-3 timeouts. Give BYOK providers 480 s and a
+          // slightly longer base backoff so the 5 retries can actually fire.
+          ...(!turnInput.preparation.llm.managedProvider
+            ? {
+                policy: {
+                  maxRetryElapsedMs: 480_000,
+                  baseDelayMs: 3_000,
+                  maxDelayMs: 30_000,
+                  maxRetries: 5,
+                },
+              }
+            : {}),
+        }),
         normalExtensions: [
           ...(!isLocalSourceProvenanceEnabled(input.options.runtimeOwnerKind)
             ? []
